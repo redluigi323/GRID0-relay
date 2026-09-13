@@ -49,6 +49,51 @@ their Mac. macOS already includes libpcap, so Npcap is not needed here.
 You can build this natively on Windows, or cross compile it from macOS.
 The Windows build needs a MinGW-w64 compiler, CMake, Ninja, Python 3, and Qt.
 
+### Building directly on Windows
+
+The easiest way is using **MSYS2 UCRT64**. Do not use Visual Studio for this
+one: the checked-in Windows Qt SDK is made for MinGW, so you need a MinGW-w64
+compiler too.
+
+1. Install [MSYS2](https://www.msys2.org/), run its update command, then close
+   and reopen the **MSYS2 UCRT64** terminal when it asks you to.
+
+   ```bash
+   pacman -Syu
+   ```
+
+2. In the UCRT64 terminal, install the build tools:
+
+   ```bash
+   pacman -S --needed git python mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja p7zip
+   ```
+
+3. Clone GRID0 Relay with its submodules:
+
+   ```bash
+   git clone --recurse-submodules https://github.com/redluigi323/GRID0-relay.git
+   cd GRID0-relay
+   ```
+
+4. Download the build-only Qt and Npcap SDK files, then build and package:
+
+   ```bash
+   python scripts/fetch-windows-deps.py --with-qt
+   python scripts/build-windows.py --compiler g++
+   ```
+
+5. The release ZIP will be under `dist/windows-x64/`. Extract the whole ZIP
+   before running `GRID0Relay.exe`.
+
+The downloaded Npcap SDK is only used to compile. It is not the capture driver
+players need. The finished app can offer to install Npcap and ZeroTier when it
+starts, or the player can install them beforehand.
+
+If CMake says it cannot find `g++`, you opened the regular MSYS terminal by
+mistake. Close it and open **MSYS2 UCRT64** instead.
+
+### Cross compiling from macOS
+
 On a Mac, the quickest way is:
 
 ```bash
