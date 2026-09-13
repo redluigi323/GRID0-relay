@@ -4,3 +4,6 @@
 [submodule "external/libuv"]
 	path = external/libuv
 	url = https://github.com/libuv/libuv.git
+[submodule "external/qt-liquid-glass"]
+	path = external/qt-liquid-glass
+	url = https://github.com/fsalinas26/qt-liquid-glass.git

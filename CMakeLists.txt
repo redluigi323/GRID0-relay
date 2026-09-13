@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.0)
-project (SwitchLanPlay)
+cmake_minimum_required(VERSION 3.24)
+project (Grid0Relay VERSION 0.6.8 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -35,7 +35,14 @@ endif()
 # add external libraries
 include(external/external.cmake)
 
+set(LANPLAY_VERSION "grid0-relay-${PROJECT_VERSION}")
+
 add_subdirectory(base)
 add_subdirectory(lwip)
 add_subdirectory(uv_lwip)
 add_subdirectory(src)
+
+option(ZLL_BUILD_GUI "Build the Qt desktop application" OFF)
+if(ZLL_BUILD_GUI)
+    add_subdirectory(desktop)
+endif()

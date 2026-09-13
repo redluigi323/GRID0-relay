@@ -1,11 +1,88 @@
 #include "lan-play.h"
 
+#ifdef __APPLE__
+#include <libproc.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <limits.h>
+
+/* Old GUI launches detached their privileged relay. Catch those legacy
+ * processes as well as new instances protected by the lifetime lock below. */
+static int acquire_relay_instance(void)
+{
+    int count = proc_listallpids(NULL, 0);
+    if (count <= 0 || count > (INT_MAX / (int)sizeof(pid_t)) - 256) {
+        eprintf("Cannot inspect running relays; refusing an unchecked duplicate start.\n");
+        return -1;
+    }
+    count += 256;
+    pid_t *pids = calloc(count, sizeof(*pids));
+    if (!pids) return -1;
+    int found = proc_listallpids(pids, count * sizeof(*pids));
+    if (found <= 0 || found >= count) {
+        free(pids);
+        eprintf("Could not obtain a complete relay process list. Try again.\n");
+        return -1;
+    }
+    for (int i = 0; i < found; ++i) {
+        if (pids[i] <= 0 || pids[i] == getpid()) continue;
+        char path[PROC_PIDPATHINFO_MAXSIZE];
+        if (proc_pidpath(pids[i], path, sizeof(path)) <= 0) continue;
+        const char *name = strrchr(path, '/');
+        if (name && !strcmp(name + 1, "grid0-relay")) {
+            eprintf("Another GRID0 Relay is already running (PID %d).\n"
+                    "Stop that relay before starting this one; two instances can interfere.\n", pids[i]);
+            free(pids);
+            return -1;
+        }
+    }
+    free(pids);
+
+    /* Do not unlink this file on exit: its inode is the shared lock. The OS
+     * releases flock on process exit, including a crash or forced stop. */
+    static int lock_fd = -1;
+    lock_fd = open("/var/run/grid0-relay.lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (lock_fd < 0) {
+        eprintf("Cannot open relay instance lock: %s. Start the relay with administrator privileges.\n", strerror(errno));
+        return -1;
+    }
+    struct stat st;
+    if (fstat(lock_fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != 0 || st.st_nlink != 1) {
+        eprintf("Relay instance lock is not a regular root-owned file.\n");
+        close(lock_fd); lock_fd = -1;
+        return -1;
+    }
+    if (flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
+        eprintf("Another GRID0 Relay holds the instance lock.\n");
+        close(lock_fd); lock_fd = -1;
+        return -1;
+    }
+    return 0;
+}
+#endif
+
 // command-line options
 struct cli_options options;
 
 OPTIONS_DEF(socks5_server_addr);
 OPTIONS_DEF(relay_server_addr);
+OPTIONS_DEF(zerotier_if);
 uv_signal_t signal_int;
+#ifdef _WIN32
+#include <shellapi.h>
+static const char *stop_event_name;
+static DWORD parent_pid;
+static HANDLE stop_event, parent_process, instance_mutex;
+static uv_timer_t control_timer;
+void lan_play_signal_cb(uv_signal_t *signal, int signum);
+static void windows_control_cb(uv_timer_t *timer)
+{
+    if ((stop_event && WaitForSingleObject(stop_event, 0) == WAIT_OBJECT_0) ||
+        (parent_process && WaitForSingleObject(parent_process, 0) == WAIT_OBJECT_0))
+        lan_play_signal_cb(&signal_int, SIGINT);
+}
+#endif
 
 int list_interfaces(pcap_if_t *alldevs)
 {
@@ -26,7 +103,7 @@ int list_interfaces(pcap_if_t *alldevs)
             for (taddr = d->addresses; taddr; taddr = taddr->next)
             {
                 sin = (struct sockaddr_in *)taddr->addr;
-                if (sin->sin_family == AF_INET) {
+                if (sin && sin->sin_family == AF_INET) {
                     strncpy(revIP, inet_ntoa(sin->sin_addr), sizeof(revIP));
                     if (first) {
                         printf("\n\tIP: [");
@@ -63,8 +140,14 @@ int parse_arguments(int argc, char **argv)
     options.pmtu = 0;
     options.fake_internet = false;
     options.list_if = false;
+    options.diagnostics = false;
+    options.status_events = false;
+    options.discover_switch = true;
 
     options.netif = NULL;
+    options.zerotier_if = NULL;
+    options.subnet = NULL;
+    options.gateway_ip = NULL;
     options.netif_ipaddr = NULL;
     options.netif_netmask = NULL;
 
@@ -85,6 +168,17 @@ int parse_arguments(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         char *arg = argv[i];
 
+#ifdef _WIN32
+        if (!strcmp(arg, "--stop-event")) {
+            CHECK_PARAM(); stop_event_name = argv[++i]; continue;
+        }
+        if (!strcmp(arg, "--parent-pid")) {
+            CHECK_PARAM(); char *end = NULL;
+            unsigned long value = strtoul(argv[++i], &end, 10);
+            if (!value || *end) return -1;
+            parent_pid = (DWORD)value; continue;
+        }
+#endif
         if (!strcmp(arg, "--help")) {
             options.help = 1;
         } else if (!strcmp(arg, "--version")) {
@@ -92,6 +186,18 @@ int parse_arguments(int argc, char **argv)
         } else if (!strcmp(arg, "--netif")) {
             CHECK_PARAM();
             options.netif = strdup(argv[i + 1]);
+            i++;
+        } else if (!strcmp(arg, "--zerotier-if")) {
+            CHECK_PARAM();
+            options.zerotier_if = strdup(argv[i + 1]);
+            i++;
+        } else if (!strcmp(arg, "--subnet")) {
+            CHECK_PARAM();
+            options.subnet = strdup(argv[i + 1]);
+            i++;
+        } else if (!strcmp(arg, "--gateway")) {
+            CHECK_PARAM();
+            options.gateway_ip = strdup(argv[i + 1]);
             i++;
         // } else if (!strcmp(arg, "--netif-netmask")) {
         //     CHECK_PARAM();
@@ -131,6 +237,16 @@ int parse_arguments(int argc, char **argv)
         //     i++;
         } else if (!strcmp(arg, "--list-if")) {
             options.list_if = true;
+        } else if (!strcmp(arg, "--diagnostics")) {
+            options.diagnostics = true;
+        } else if (!strcmp(arg, "--status-events")) {
+            options.status_events = true;
+        } else if (!strcmp(arg, "--capture-prefix")) {
+            CHECK_PARAM();
+            options.capture_prefix = argv[++i];
+            options.diagnostics = true;
+        } else if (!strcmp(arg, "--no-discover-switch")) {
+            options.discover_switch = false;
         } else if (!strcmp(arg, "--broadcast")) {
             options.broadcast = true;
             options.relay_server_addr = "255.255.255.255:11451";
@@ -163,14 +279,8 @@ int parse_arguments(int argc, char **argv)
     if (options.help || options.version || options.list_if || options.rpc) {
         return 0;
     }
-    if (!options.relay_server_addr) {
-        if (options.socks5_server_addr) {
-            options.relay_server_addr = "127.0.0.1:11451";
-        } else {
-            eprintf("--relay-server-addr is required\n");
-        }
-        // return -1;
-    }
+    // The fork's normal path will use the native ZeroTier transport. Keep
+    // this option only for explicitly requested legacy upstream diagnostics.
     if (options.socks5_username) {
         if (!options.socks5_password && !options.socks5_password_file) {
             eprintf("username given but password not given\n");
@@ -207,12 +317,19 @@ void print_help(const char *name)
         "        [--broadcast]\n"
         "        [--fake-internet]\n"
         "        [--netif <interface>] default: all\n"
+        "        --zerotier-if <interface>\n"
+        "        [--subnet <IPv4/CIDR>] default: " SUBNET_NET "/24\n"
+        "        [--gateway <IPv4>] default: " SERVER_IP "\n"
         // "        [--netif-netmask <ipnetmask>] default: 255.255.0.0\n"
         "        [--relay-server-addr <addr>]\n"
         "        [--username <username>]\n"
         "        [--password <password>]\n"
         "        [--password-file <password-file>]\n"
         "        [--list-if]\n"
+        "        [--diagnostics] print ARP/IPv4 relay traffic\n"
+        "        [--status-events] print console detection without packet diagnostics\n"
+        "        [--capture-prefix <path>] save five packet traces, including game payloads\n"
+        "        [--no-discover-switch] disable automatic local Switch ARP discovery\n"
         "        [--pmtu <pmtu>]\n"
         "        [--socks5-server-addr <addr>]\n"
         "        [--rpc <address>]\n"
@@ -237,6 +354,7 @@ void walk_cb(uv_handle_t* handle, void* arg)
 
 void lan_play_signal_cb(uv_signal_t *signal, int signum)
 {
+    if (uv_is_closing((uv_handle_t *)&signal_int)) return;
     struct lan_play *lan_play = signal->data;
     eprintf("stopping signum: %d\n", signum);
 
@@ -257,7 +375,7 @@ void lan_play_signal_cb(uv_signal_t *signal, int signum)
 
 void print_version()
 {
-    printf("switch-lan-play " LANPLAY_VERSION "\n");
+    printf("GRID0 Relay " LANPLAY_VERSION "\n");
 }
 
 void list_netif()
@@ -277,7 +395,6 @@ void list_netif()
 
 int old_main()
 {
-    char relay_server_addr[128] = { 0 };
     struct lan_play *lan_play = &real_lan_play;
     int ret;
 
@@ -293,16 +410,28 @@ int old_main()
         return 0;
     }
 
-    if (options.relay_server_addr == NULL) {
-        printf("Input the relay server address [ domain/ip:port ]:");
-        scanf("%100s", relay_server_addr);
-        options.relay_server_addr = relay_server_addr;
+    if (options.zerotier_if == NULL || options.netif == NULL) {
+        eprintf("Native mode requires --netif WIFI_INTERFACE and --zerotier-if ZEROTIER_INTERFACE.\n");
+        return 2;
     }
 
-    if (parse_addr(options.relay_server_addr, &lan_play->server_addr) != 0) {
-        LLOG(LLOG_ERROR, "Failed to parse and get ip address. --relay-server-addr: %s", options.relay_server_addr);
-        return -1;
+#ifdef __APPLE__
+    if (acquire_relay_instance() != 0) return 2;
+#elif defined(_WIN32)
+    instance_mutex = CreateMutexW(NULL, FALSE, L"Local\\Grid0Relay.NativeRelay");
+    if (!instance_mutex || GetLastError() == ERROR_ALREADY_EXISTS) {
+        eprintf("Another GRID0 Relay relay is running, or its instance lock is unavailable.\n");
+        return 2;
     }
+    if (stop_event_name) {
+        stop_event = OpenEventA(SYNCHRONIZE, FALSE, stop_event_name);
+        if (!stop_event) { eprintf("Cannot open the desktop stop event.\n"); return 2; }
+    }
+    if (parent_pid) {
+        parent_process = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+        if (!parent_process) { eprintf("The desktop process is unavailable.\n"); return 2; }
+    }
+#endif
 
     RT_ASSERT(uv_signal_init(lan_play->loop, &signal_int) == 0);
     RT_ASSERT(uv_signal_start(&signal_int, lan_play_signal_cb, SIGINT) == 0);
@@ -313,8 +442,19 @@ int old_main()
     } else {
         printf("Opening single interface\n");
     }
-    RT_ASSERT(lan_play_init(lan_play) == 0);
+    ret = lan_play_init(lan_play);
+    if (ret != 0) {
+        eprintf("Failed to start native relay (status %d): %s\n", ret, lan_play->last_err[0] ? lan_play->last_err : "unknown initialization error");
+        return ret;
+    }
 
+#ifdef _WIN32
+    if (stop_event || parent_process) {
+        RT_ASSERT(uv_timer_init(lan_play->loop, &control_timer) == 0);
+        RT_ASSERT(uv_timer_start(&control_timer, windows_control_cb, 0, 100) == 0);
+    }
+#endif
+    eprintf("Relay started (PID %d)\n", (int)getpid());
     ret = uv_run(lan_play->loop, UV_RUN_DEFAULT);
     if (ret) {
         LLOG(LLOG_ERROR, "uv_run %d", ret);
@@ -327,6 +467,22 @@ int old_main()
 
 int main(int argc, char **argv)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+#ifdef _WIN32
+    // QProcess sends Unicode arguments. Preserve non-ASCII report paths.
+    LPWSTR *wide = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!wide) return 1;
+    argv = calloc(argc + 1, sizeof(char *));
+    if (!argv) { LocalFree(wide); return 1; }
+    for (int i = 0; i < argc; ++i) {
+        int n = WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, NULL, 0, NULL, NULL);
+        argv[i] = malloc(n);
+        if (!argv[i]) { LocalFree(wide); return 1; }
+        WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, argv[i], n, NULL, NULL);
+    }
+    LocalFree(wide); // UTF-8 argv remains valid for the process lifetime.
+#endif
     if (parse_arguments(argc, argv) != 0) {
         LLOG(LLOG_ERROR, "Failed to parse arguments");
         print_help(argv[0]);
@@ -337,6 +493,15 @@ int main(int argc, char **argv)
         print_help(argv[0]);
         return 0;
     }
+#ifdef _WIN32
+    if (!options.version) {
+        char error[1024];
+        if (zll_npcap_load(error, sizeof(error)) != 0) {
+            eprintf("[ERROR]: %s\n", error); return 2;
+        }
+        eprintf("Capture runtime: %s\n", pcap_lib_version());
+    }
+#endif
     if (options.rpc) {
         return rpc_main(options.rpc, options.rpc_token, options.rpc_protocol);
     } else {

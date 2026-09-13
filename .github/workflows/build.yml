@@ -1,65 +1,70 @@
 name: Build
-
-on: [push]
-
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
 jobs:
-  build-linux:
-    runs-on: ubuntu-latest
-
+  unix-cli:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-    - name: install dependencies
-      run: sudo apt install -y libpcap-dev
-    - name: make
-      run: |
-        mkdir build
-        cd build
-        cmake ..
-        make
-    - name: upload built files
-      uses: actions/upload-artifact@v4
-      with:
-        name: lan-play-linux
-        path: build/src/lan-play
-  build-windows:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+      - name: Build relay
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build build --parallel 4
+          ./build/src/grid0-relay --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grid0-relay-${{ runner.os }}-cli
+          path: build/src/grid0-relay
+  windows:
     runs-on: windows-latest
-
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-    - name: Setup msbuild.exe
-      uses: microsoft/setup-msbuild@v1.1
-    - name: make
-      run: |
-        mkdir build
-        cd build
-        cmake ..
-        msbuild SwitchLanPlay.sln
-
-    - name: upload built files
-      uses: actions/upload-artifact@v4
-      with:
-        name: lan-play-windows
-        path: build/src/Debug/lan-play.exe
-  build-macos:
-    runs-on: macos-latest
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-    - name: make
-      run: |
-        mkdir build
-        cd build
-        cmake ..
-        make
-
-    - name: upload built files
-      uses: actions/upload-artifact@v4
-      with:
-        name: lan-play-macos
-        path: build/src/lan-play
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+      - name: Select native MinGW tools
+        shell: pwsh
+        run: '"C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append'
+      - name: Fetch pinned SDKs
+        run: python scripts/fetch-windows-deps.py --with-qt
+      - name: Build and package with launcher tests
+        run: python scripts/build-windows.py --compiler g++ --include-tests --output dist/windows-test
+      - name: Run Windows launcher tests without capture drivers
+        shell: pwsh
+        run: |
+          & dist/windows-test/Zero-Lan-line/zll-desktop-tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & dist/windows-test/Grid0-Relay/grid0-relay.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $log = & dist/windows-test/Grid0-Relay/grid0-relay.exe --list-if 2>&1
+          if ($LASTEXITCODE -ne 2 -or "$log" -notmatch 'Npcap could not be loaded') {
+            throw "Expected actionable missing-Npcap error on this driver-free runner: $log"
+          }
+      - name: Check linked entry point and execute GUI startup
+        run: |
+          python tests/check_windows_entrypoint.py build-windows/desktop/Grid0Relay.exe --objdump objdump
+          python tests/test_windows_gui_startup.py dist/windows-test/Zero-Lan-line
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          & dist/windows-test/Zero-Lan-line/zll-layout-tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package player build
+        run: python desktop/package-windows.py --build build-windows --qt deps/windows/qt --qt-source deps/windows/downloads/qtbase-everywhere-src-6.11.2.tar.xz --compiler g++ --output dist/windows-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zero-Lan-line-Windows-x64
+          path: dist/windows-x64/Zero-Lan-line-Windows-x64.zip

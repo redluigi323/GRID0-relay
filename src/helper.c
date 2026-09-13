@@ -71,55 +71,8 @@ void print_hex(const void *buf, int len)
 }
 
 #if defined(_WIN32)
-// https://stackoverflow.com/questions/47748975/how-to-get-selected-adapters-mac-address-in-winpcap
 #include <winsock2.h>
 #include <iphlpapi.h>
-
-// Compare the guid parts of both names and see if they match
-int compare_guid(wchar_t *wszPcapName, wchar_t *wszIfName)
-{
-    wchar_t *pc, *ic;
-
-    // Find first { char in device name from pcap
-    for (pc = wszPcapName; ; ++pc)
-    {
-        if (!*pc)
-            return -1;
-
-        if (*pc == L'{'){
-            pc++;
-            break;
-        }
-    }
-
-    // Find first { char in interface name from windows
-    for (ic = wszIfName; ; ++ic)
-    {
-        if (!*ic)
-            return 1;
-
-        if (*ic == L'{'){
-            ic++;
-            break;
-        }
-    }
-
-    // See if the rest of the GUID string matches
-    for (;; ++pc,++ic)
-    {
-        if (!pc)
-            return -1;
-
-        if (!ic)
-            return 1;
-
-        if ((*pc == L'}') && (*ic == L'}'))
-            return 0;
-
-        if (*pc != *ic)
-            return *ic - *pc;
-    }
-}
 #endif
 
 // Find mac address using GetIFTable, since the GetAdaptersAddresses etc     functions
@@ -127,82 +80,27 @@ int compare_guid(wchar_t *wszPcapName, wchar_t *wszIfName)
 int get_mac_address(pcap_if_t *d, pcap_t *p, u_char mac_addr[6])
 {
 #if defined(_WIN32)
-    // Declare and initialize variables.
-
-    wchar_t* wszWideName = NULL;
-
-    DWORD dwSize = 0;
-    DWORD dwRetVal = 0;
-
-    int nRVal = 0;
-
-    unsigned int i;
-
-
-    /* variables used for GetIfTable and GetIfEntry */
-    MIB_IFTABLE *pIfTable;
-    MIB_IFROW *pIfRow;
-
-    // Allocate memory for our pointers.
-    pIfTable = (MIB_IFTABLE *)malloc(sizeof(MIB_IFTABLE));
-    if (pIfTable == NULL) {
-        return 0;
+    const char *guid = strchr(d->name, '{');
+    if (!guid) return -1;
+    ULONG size = 16384;
+    IP_ADAPTER_ADDRESSES *all = NULL;
+    DWORD status;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        free(all); all = malloc(size);
+        if (!all) return -1;
+        status = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, all, &size);
+        if (status != ERROR_BUFFER_OVERFLOW) break;
     }
-    // Make an initial call to GetIfTable to get the
-    // necessary size into dwSize
-    dwSize = sizeof(MIB_IFTABLE);
-    dwRetVal = GetIfTable(pIfTable, &dwSize, FALSE);
-
-    if (dwRetVal == ERROR_INSUFFICIENT_BUFFER) {
-        free(pIfTable);
-        pIfTable = (MIB_IFTABLE *)malloc(dwSize);
-        if (pIfTable == NULL) {
-            return 0;
-        }
-
-        dwRetVal = GetIfTable(pIfTable, &dwSize, FALSE);
-    }
-
-    if (dwRetVal != NO_ERROR)
-        goto done;
-
-    // Convert input pcap device name to a wide string for compare
-    {
-        size_t stISize,stOSize;
-
-        stISize = strlen(d->name) + 1;
-
-        wszWideName = malloc(stISize * sizeof(wchar_t));
-
-        if (!wszWideName)
-            goto done;
-
-        mbstowcs_s(&stOSize,wszWideName,stISize, d->name, stISize);
-    }
-
-    for (i = 0; i < pIfTable->dwNumEntries; i++) {
-        pIfRow = (MIB_IFROW *)& pIfTable->table[i];
-
-        if (!compare_guid(wszWideName, pIfRow->wszName)){
-            if (pIfRow->dwPhysAddrLen != 6)
-                continue;
-
-            memcpy(mac_addr, pIfRow->bPhysAddr, 6);
-            nRVal = 1;
-            break;
+    int result = -1;
+    if (status == NO_ERROR) {
+        for (IP_ADAPTER_ADDRESSES *a = all; a; a = a->Next) {
+            if (a->AdapterName && !_stricmp(guid, a->AdapterName) && a->PhysicalAddressLength == 6) {
+                memcpy(mac_addr, a->PhysicalAddress, 6); result = 0; break;
+            }
         }
     }
-
-done:
-    if (pIfTable != NULL)
-        free(pIfTable);
-    pIfTable = NULL;
-
-    if (wszWideName != NULL)
-        free(wszWideName);
-    wszWideName = NULL;
-
-    return nRVal == 1 ? 0 : -1;
+    free(all);
+    return result;
 #elif defined(__linux__)
     int fd = pcap_fileno(p);
     struct ifreq buffer;
@@ -217,7 +115,6 @@ done:
     memcpy(mac_addr, buffer.ifr_hwaddr.sa_data, 6);
     return result;
 #elif defined(__APPLE__)
-#define LLADDR(s) ((caddr_t)((s)->sdl_data + (s)->sdl_nlen))
     pcap_addr_t *alladdrs;
     pcap_addr_t *a;
     struct sockaddr_dl* link;
@@ -225,7 +122,7 @@ done:
     alladdrs = d->addresses;
     for (a = alladdrs; a != NULL; a = a->next) {
         if(a->addr->sa_family == AF_LINK) {
-            link = (struct sockaddr_dl*)a->addr->sa_data;
+            link = (struct sockaddr_dl*)a->addr;
 
             caddr_t macaddr = LLADDR(link);
             // fprintf(stderr, "sdl_alen %d\n", link->sdl_alen);

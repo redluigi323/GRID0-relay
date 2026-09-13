@@ -1,5 +1,14 @@
 #include "ipv4.h"
 
+static const uint8_t broadcast_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
+/* Nintendo Switch LAN discovery uses the directed broadcast for 10.0.0.0/8,
+ * even when the manually configured game interface is a smaller subnet. */
+static bool is_nintendo_lan_broadcast(const uint8_t ip[4])
+{
+    return ip[0] == 10 && ip[1] == 255 && ip[2] == 255 && ip[3] == 255;
+}
+
 int send_ipv4(
     struct packet_ctx *arg,
     const void *dst,
@@ -96,15 +105,27 @@ int process_ipv4(struct packet_ctx *arg, const struct ether_frame *ether)
             case IPV4_PROTOCOL_ICMP:
                 return process_icmp(arg, &ipv4);
         }
+    } else if (is_nintendo_lan_broadcast(ipv4.dst)) {
+        if (arg->arg->ingress_zerotier) {
+            struct payload local;
+            local.ptr = ipv4.ether->payload;
+            local.len = ipv4.total_len;
+            local.next = NULL;
+            return send_ether(arg, broadcast_mac, ETHER_TYPE_IPV4, &local);
+        }
+        return lan_play_send_zerotier_ipv4_broadcast(arg->arg, ipv4.ether->payload, ipv4.total_len);
     } else if (IS_SUBNET(ipv4.dst, arg->subnet_net, arg->subnet_mask)) {
         if (IS_BROADCAST(ipv4.dst, arg->subnet_net, arg->subnet_mask)) {
-            lan_client_send_ipv4(arg->arg, ipv4.dst, ipv4.ether->payload, ipv4.total_len);
-
-            struct payload part;
-            part.ptr = ipv4.ether->payload;
-            part.len = ipv4.total_len;
-            part.next = NULL;
-            return send_ether(arg, ether->src, ETHER_TYPE_IPV4, &part);
+            if (arg->arg->ingress_zerotier) {
+                struct payload local;
+                local.ptr = ipv4.ether->payload;
+                local.len = ipv4.total_len;
+                local.next = NULL;
+                return send_ether(arg, broadcast_mac, ETHER_TYPE_IPV4, &local);
+            }
+            return lan_client_send_ipv4(arg->arg, ipv4.dst, ipv4.ether->payload, ipv4.total_len);
+        } else if (!arg->arg->ingress_zerotier) {
+            return lan_client_send_ipv4(arg->arg, ipv4.dst, ipv4.ether->payload, ipv4.total_len);
         } else if (arp_has_ip(arg, ipv4.dst)) {
             uint8_t dst_mac[6];
             struct payload part;

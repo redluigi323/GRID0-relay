@@ -51,6 +51,38 @@ struct lan_play {
 
     uv_loop_t *loop;
     uv_pcap_t pcap;
+    uv_pcap_t zerotier_pcap;
+    bool ingress_zerotier;
+    uint64_t wifi_arp_rx;
+    uint64_t wifi_ipv4_rx;
+    uint64_t zerotier_arp_rx;
+    uint64_t zerotier_ipv4_rx;
+    uint64_t wifi_tx;
+    uint64_t wifi_probe_tx;
+    uint64_t zerotier_tx;
+    uv_timer_t switch_discovery_timer;
+    uint8_t switch_discovery_host;
+    uint16_t switch_discovery_pause_ticks;
+    uint8_t wifi_mac[6];
+    uint8_t zerotier_mac[6];
+    uint8_t zerotier_ip[4];
+    uint8_t zerotier_netmask[4];
+    uint8_t zerotier_broadcast_ip[4];
+    uint8_t switch_mac[6];
+    uint8_t switch_ip[4];
+    bool switch_seen;
+    bool warned_broadcast_mismatch;
+    struct packet_ctx zerotier_neighbors;
+    struct native_udp_guard *udp_guard;
+    bool wifi_delivery_probe_sent;
+    bool wifi_delivery_probe_replied;
+    uint8_t wifi_delivery_probe_payload[16];
+    uint8_t wifi_delivery_probe_ip[4];
+    uint8_t wifi_delivery_probe_mac[6];
+    pcap_t *capture_format;
+    pcap_dumper_t *captures[5];
+    uint64_t capture_start_ns;
+    time_t capture_start_time;
     uint8_t client_buf[CLIENT_RECV_BUF_LEN];
     uv_udp_send_t client_send_req;
 
@@ -69,7 +101,7 @@ struct lan_play {
     unsigned char key[LP_KEY_LEN];
 
     struct gateway *gateway;
-    char last_err[PCAP_ERRBUF_SIZE];
+    char last_err[1024];
 
     uint64_t upload_byte;
     uint64_t download_byte;
@@ -78,6 +110,10 @@ struct lan_play {
 };
 
 int lan_play_send_packet(struct lan_play *lan_play, void *data, int size);
+int lan_play_send_zerotier_arp(struct lan_play *lan_play, const uint8_t *sender_ip, const uint8_t *target_ip);
+int lan_play_send_zerotier_arp_reply(struct lan_play *lan_play, const uint8_t *target_mac, const uint8_t *target_ip, const uint8_t *sender_ip);
+int lan_play_send_zerotier_ipv4(struct lan_play *lan_play, const void *dst_ip, const void *packet, uint16_t len);
+int lan_play_send_zerotier_ipv4_broadcast(struct lan_play *lan_play, const void *packet, uint16_t len);
 int lan_play_gateway_send_packet(struct packet_ctx *packet_ctx, const void *data, uint16_t len);
 int lan_client_init(struct lan_play *lan_play);
 int lan_client_close(struct lan_play *lan_play);
@@ -91,9 +127,16 @@ struct cli_options {
     int pmtu;
     bool fake_internet;
     bool list_if;
+    bool diagnostics;
+    bool status_events;
+    bool discover_switch;
+    char *capture_prefix;
 
     char *netif_ipaddr;
     char *netif;
+    char *zerotier_if;
+    char *subnet;
+    char *gateway_ip;
     char *netif_netmask;
 
     char *relay_server_addr;
@@ -128,6 +171,7 @@ int lan_play_close(struct lan_play *lan_play);
 OPTIONS_DEC(netif);
 OPTIONS_DEC(socks5_server_addr);
 OPTIONS_DEC(relay_server_addr);
+OPTIONS_DEC(zerotier_if);
 
 #ifdef __cplusplus
 }

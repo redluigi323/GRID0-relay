@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/branding">
+        <file alias="grid0-app-icon.png">resources/grid0-app-icon.png</file>
+        <file alias="grid0-logo.png">resources/grid0-logo.png</file>
+    </qresource>
+</RCC>

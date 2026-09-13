@@ -1,16 +1,7 @@
-execute_process(COMMAND git describe --tags
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    OUTPUT_VARIABLE LANPLAY_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-if (LANPLAY_VERSION STREQUAL "")
-    set(LANPLAY_VERSION v0.2.0)
-    MESSAGE("git describe --tags output is empty, set version to ${LANPLAY_VERSION}")
-endif()
-
 set(src
     main.c
     lan-play.c
+    native-udp.c
     pcaploop.cpp
     packet.c
     arp.c
@@ -30,42 +21,43 @@ set(src
     rpc/rpc-ws-server.cpp
 )
 
-add_executable(lan-play ${src})
+add_executable(grid0-relay ${src})
 
 target_compile_options(
-    lan-play
+    grid0-relay
     PRIVATE "-DLANPLAY_VERSION=\"${LANPLAY_VERSION}\""
 )
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL GNU)
     target_compile_options(
-        lan-play
+        grid0-relay
         PRIVATE "-Wall"
         PRIVATE "-Wno-unused-function"
     )
 endif()
 
-set_target_properties(lan-play PROPERTIES CXX_STANDARD 17)
+set_target_properties(grid0-relay PROPERTIES CXX_STANDARD 17)
 
 if(NOT ((CMAKE_SYSTEM_NAME STREQUAL "Darwin") OR MSVC))
-    target_link_libraries(lan-play atomic)
+    target_link_libraries(grid0-relay atomic)
 endif()
-target_link_libraries(lan-play base)
-target_link_libraries(lan-play uv_lwip)
-target_link_libraries(lan-play uv_a)
+target_link_libraries(grid0-relay base)
+target_link_libraries(grid0-relay uv_lwip)
+target_link_libraries(grid0-relay uv_a)
 
 find_package(PCAP REQUIRED)
-target_link_libraries(lan-play ${PCAP_LIBRARY})
-target_include_directories(lan-play PRIVATE ${PCAP_INCLUDE_DIR})
+if(NOT WIN32)
+    target_link_libraries(grid0-relay ${PCAP_LIBRARY})
+endif()
+target_include_directories(grid0-relay PRIVATE ${PCAP_INCLUDE_DIR})
 
 if (WIN32)
-    add_dependencies(lan-play winpcap)
-    target_link_libraries(lan-play ws2_32.lib iphlpapi.lib psapi userenv.lib)
-    # https://stackoverflow.com/questions/13768515/how-to-do-static-linking-of-libwinpthread-1-dll-in-mingw
-    target_link_libraries(lan-play -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
+    target_sources(grid0-relay PRIVATE npcap-loader.c)
+    target_link_libraries(grid0-relay ws2_32 iphlpapi psapi userenv shell32)
+    target_compile_definitions(grid0-relay PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
 else()
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
-        target_link_libraries(lan-play pthread)
+        target_link_libraries(grid0-relay pthread)
     endif()
 endif()
 
-INSTALL(TARGETS lan-play RUNTIME DESTINATION bin)
+INSTALL(TARGETS grid0-relay RUNTIME DESTINATION bin)

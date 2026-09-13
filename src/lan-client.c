@@ -510,7 +510,7 @@ int lan_client_send_keepalive(struct lan_play *lan_play)
 
 int lan_client_send_ipv4(struct lan_play *lan_play, void *dst_ip, const void *packet, uint16_t len)
 {
-    return lan_client_send(lan_play, LAN_CLIENT_TYPE_IPV4, packet, len);
+    return lan_play_send_zerotier_ipv4(lan_play, dst_ip, packet, len);
 }
 
 int lan_client_send_auth_me(struct lan_play *lan_play, const void *packet, uint16_t len)

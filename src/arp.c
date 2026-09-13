@@ -102,8 +102,17 @@ int arp_request(struct packet_ctx *self, const struct arp *arp)
         if (CMP_IPV4(arp->sender_ip, NONE_IP)) {
             return 0;
         }
-        if (arp_has_ip(self, arp->target_ip)) {
-            return 0;
+        if (self->arg->ingress_zerotier) {
+            /* The stock Switch is represented on the virtual LAN by this
+             * relay's managed ZeroTier address, not by its Wi-Fi address. */
+            if (!CMP_IPV4(arp->target_ip, self->arg->zerotier_ip)) {
+                return 0;
+            }
+            return lan_play_send_zerotier_arp_reply(self->arg, arp->sender_mac, arp->target_ip, arp->sender_ip);
+        }
+        if (!CMP_IPV4(arp->target_ip, self->ip) && !arp_has_ip(self, arp->target_ip) &&
+            !options.zerotier_if) {
+            lan_play_send_zerotier_arp(self->arg, arp->sender_ip, arp->target_ip);
         }
         return send_arp(
             self,

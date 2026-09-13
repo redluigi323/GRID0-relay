@@ -1,153 +1,70 @@
-# switch-lan-play
-[![Build status](https://github.com/spacemeowx2/switch-lan-play/workflows/Build/badge.svg)](https://github.com/spacemeowx2/switch-lan-play/actions?query=workflow%3ABuild)
-[![Chat on discord](https://img.shields.io/badge/chat-on%20discord-7289da.svg)](https://discord.gg/zEMCu5n)
+# GRID0 Relay
 
-English | [中文](README_zh.md)
+GRID0 Relay is a GPLv3 fork of switch-lan-play intended to connect a stock Nintendo Switch in native LAN mode with a sys-zerotier Switch. It retains upstream's pcap Wi-Fi handling, ARP mediation, fake-gateway/lwIP code, and cross-platform adapter discovery.
 
-Enjoy games with your friends as if you were on a LAN.
+The custom UDP relay path has been replaced in the native launch path by a separate ZeroTier capture/injection handle. The relay sends proxy ARP and IPv4 frames through it and reconstructs frames for the local Wi-Fi interface. It does not require ZeroTier's Allow Bridging option because pcap injects with the relay's own adapter MAC on each link.
 
-```
-                     Internet
-                        |
-                  [SOCKS5 Proxy] (optional)
-                        |
-        ARP,IPv4        |          LAN Packets
-Switch <-------->  PC(lan-play)  <-------------> Server
-                                       UDP
-```
-
-# Usage
-
-To play with your friends, both you and your friends need to run the lan-play client connecting to the **same** Server on your PCs, and set static IP on your Switch.
-
-Your PC and Switch **must** be connected to the same router.
-
-Visit [https://www.lan-play.com/](http://lan-play.com/install-switch) for instructions on how to set this up. See below for build instructions.
-
-## SOCKS5 Proxy
-
-lan-play --socks5-server-addr example.com:1080
-
-Data sent to the relay server does not pass through the proxy.
-
-# Build
-
-## Debug or Release
-
-`cmake -DCMAKE_BUILD_TYPE=Debug ..`
-`cmake -DCMAKE_BUILD_TYPE=Release ..`
-
-## Ubuntu / Debian
-
-This project depends on libpcap, you can install libpcap0.8-dev on Ubuntu or Debian:
-
-`sudo apt install libpcap0.8-dev git gcc g++ cmake`
-
-Prepare cmake and gcc, then run the following:
+Run native mode with an explicit Wi-Fi and ZeroTier capture interface. The default gaming subnet is `10.147.17.0/24` and its local fake-gateway address is `10.147.17.1`; both are runtime settings.
 
 ```sh
-mkdir build
-cd build
-cmake ..
-make
+sudo ./build/src/grid0-relay --netif en0 --zerotier-if ZEROTIER_INTERFACE
 ```
 
-## Windows
-
-Use [MSYS2](http://www.msys2.org/) to compile.
+Use `--list-if` to find capture-interface names. For Splatoon/sys-zerotier, copy the **IP and exact subnet mask of the selected ZeroTier adapter** to the Switch, along with the fake gateway. The relay prints all three at startup; the Qt app displays them on Play. Do not pick a different Switch IP or reuse the legacy `255.0.0.0` mask for a `/24` ZeroTier network. Reconnect the Switch and restart LAN mode after changing these settings. To use another range, pass matching values to the relay:
 
 ```sh
-pacman -Sy
-pacman -S make \
-    mingw-w64-x86_64-cmake \
-    mingw-w64-x86_64-gcc
+sudo ./build/src/grid0-relay --netif en0 --zerotier-if ZEROTIER_INTERFACE \\
+  --subnet 10.147.23.0/24 --gateway 10.147.23.1
 ```
 
-To compile a 32-bit program:
+The relay only captures ARP and IPv4 after opening the two named adapters. It never asks ZeroTier to bridge foreign Ethernet MAC addresses.
+
+The subnet mask matters to the game itself: PIA's authenticated LAN challenge includes the subnet broadcast address in its encryption nonce. Changing only the packet's destination cannot repair a challenge made for a different broadcast address. See the [LAN protocol research](https://github.com/kinnay/NintendoClients/wiki/LAN-Protocol#crypto-challenge). Incoming broadcasts now preserve the ZeroTier subnet broadcast; outgoing UDP/35000 with a conflicting legacy broadcast produces an explicit warning.
+
+Do not use the remaining legacy `--relay-server-addr` option for the intended sys-zerotier path.
+
+Read [FORK_NOTICE.md](FORK_NOTICE.md) for upstream attribution and licensing. The full GPLv3 text is in [LICENSE.txt](LICENSE.txt).
+
+## Build on macOS
+
+The fork vendors the upstream-pinned libuv and uvw submodules. With Xcode Command Line Tools and CMake installed:
 
 ```sh
-pacman -S mingw-w64-i686-cmake \
-    mingw-w64-i686-gcc
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build
+./build/src/grid0-relay --version
 ```
 
-Open `MSYS2 MinGW 64-bit` or `MSYS2 MinGW 32-bit`.
+The compatibility setting is needed by the historical, pinned libuv CMake files. Their compiler warnings are upstream dependency warnings.
+
+## Qt desktop app
+
+The desktop UI now lives in [desktop](desktop), using Qt 6 Widgets with the system style and palette. On macOS, the Play page gives the relay summary and Switch-settings panel a restrained native Liquid Glass treatment through the vendored [qt-liquid-glass](https://github.com/fsalinas26/qt-liquid-glass) library. macOS 26 uses `NSGlassEffectView`; earlier supported macOS versions use the library's visual-effect fallback. The earlier SwiftUI prototype is retained under `macos/Grid0RelayApp` as reference, but is not part of the current desktop build.
+
+On macOS:
 
 ```sh
-mkdir build
-cd build
-cmake -G "MSYS Makefiles" ..
-make
+brew install qtbase cmake
+cmake -S . -B build -DZLL_BUILD_GUI=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"
+cmake --build build --parallel 4
+open build/desktop/Grid0Relay.app
 ```
 
-## Mac OS
+**Play** provides Start/Stop, console detection, and the exact Switch network settings. **Settings → Connection** remembers adapter selection and the fake gateway. **Settings → Advanced** contains diagnostics, packet captures, automatic discovery, a custom relay executable, and report export. On macOS, the UI remains unprivileged and requests administrator authorization only when starting the relay. The first Windows preview requests UAC elevation when the app opens. Stopping or closing the window shuts down the child relay. See [desktop/README.md](desktop/README.md) for packaging, testing and platform status.
+
+The user reported successful Splatoon 3 room discovery and hosting after matching the Switch mask to ZeroTier and preserving the broadcast address. Captures 04/05 contain session UDP in both directions. This validates that tested setup, not every game/router/platform combination.
+
+For a failed lobby test, use `--diagnostics` on the CLI or enable detailed diagnostics in Advanced. Optional packet captures contain game payloads and network addresses and stay local until exported. [docs/relay-diagnostics.md](docs/relay-diagnostics.md) explains the traffic entries. Lightweight `--status-events` reports console candidates without enabling verbose packet logging.
+
+## Windows x64 preview
+
+The Qt desktop app and native Npcap relay now cross-compile for Windows x64. The Windows package includes Qt's Windows 11 style and its runtime DLLs. Players install **Npcap** and **ZeroTier One** separately; the SDK is only needed at build time. Automatic hotspot/ICS/dependency installation is not included.
+
+See [Windows setup and build instructions](docs/windows.md). On this Mac, with MinGW-w64, CMake, Ninja and Qt 6.11.2 host tools installed:
 
 ```sh
-brew install cmake
+python3 scripts/fetch-windows-deps.py --with-qt
+python3 scripts/build-windows.py --host-qt "$(brew --prefix qtbase)"
 ```
 
-```sh
-mkdir build
-cd build
-cmake ..
-make
-```
-
-# Server
-
-## Docker
-
-`docker run -d -p 11451:11451/udp -p 11451:11451/tcp spacemeowx2/switch-lan-play`
-
-## Node
-
-```sh
-git clone https://github.com/spacemeowx2/switch-lan-play
-cd switch-lan-play/server
-npm install
-npm run build # build ts to js. run it again when code changes.
-npm start
-```
-
-Use `--port` to pass the port parameter, or it will use `11451/udp` as the default.
-
-Use `--simpleAuth` to pass authentication via username and password, or there will be no authentication.
-
-Use `--httpAuth` to pass authentication via HTTP URL, or there will be no authentication.
-
-Use `--jsonAuth` to pass authentication via JSON file, or there will be no authentication.
-
-Example:
-
-```sh
-npm run build
-npm start -- --port 10086 --simpleAuth username:password
-```
-
-Meanwhile, the monitor service will start on port `11451/tcp` by default. You can get the online client count via an HTTP request:
-
-Request: `GET http://{YOUR_SERVER_IP}:11451/info`
-
-Response: `{ "online": 42 }`
-
-
-# Protocol
-
-The protocol is quite simple at the moment, but additional fields may be added to calculate network quality (packet loss, ping), such as timestamp, seq_id, etc.
-
-```c
-struct packet {
-    uint8_t type;
-    uint8_t payload[packet_len - 1];
-};
-```
-
-```c
-enum type {
-    KEEPALIVE = 0,
-    IPV4 = 1,
-    PING = 2,
-    IPV4_FRAG = 3
-};
-```
-
-The server can read IP addresses from the payload and save the source IP -> LAN IP to a cache table. If the target IP address shown in the payload doesn't match the cache, the packet is broadcast to the entire room.
+The Windows executables are compiled and their packaged DLL dependencies checked. Windows gameplay and administrator launch remain unverified until tested on a Windows PC. Native Windows CI is configured for compilation and mock launcher tests.

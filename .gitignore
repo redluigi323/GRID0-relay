@@ -1,6 +1,9 @@
 .idea
 build/
 build-*/
+dist/
+*.pcap
+.build/
 .vs/
 CMakeSettings.json
 .vscode
@@ -10,3 +13,6 @@ debug.sh
 memcheck.sh
 valgrind_ignore
 yarn.lock
+
+deps/
+__pycache__/

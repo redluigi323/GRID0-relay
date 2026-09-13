@@ -11,15 +11,17 @@ if (UV_LIBRARY)
     )
 else()
     message(STATUS "Installing libuv via submodule")
-    execute_process(COMMAND git submodule update --init -- external/libuv
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/libuv/CMakeLists.txt")
+        execute_process(COMMAND git submodule update --init -- external/libuv
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    endif()
     add_subdirectory(external/libuv EXCLUDE_FROM_ALL)
     target_include_directories(uv_a INTERFACE external/libuv/include)
     if (UV_TERMUX_PATCH)
         message(STATUS "Apply libuv_termux.diff")
         execute_process(COMMAND git apply ../patch/libuv_termux.diff
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/external/libuv)
-    else()
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/libuv/.git")
         execute_process(COMMAND git apply -R ../patch/libuv_termux.diff
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/external/libuv)
     endif()
@@ -33,8 +35,10 @@ if (UVW_LIBRARY)
     )
 else()
     message(STATUS "Installing uvw via submodule")
-    execute_process(COMMAND git submodule update --init -- external/uvw
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/uvw/CMakeLists.txt")
+        execute_process(COMMAND git submodule update --init -- external/uvw
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    endif()
     add_subdirectory(external/uvw EXCLUDE_FROM_ALL)
     include_directories(external/uvw/src)
 endif()
