@@ -21,3 +21,10 @@ simple usage guide:
 
 
 Then just start the relay and play with your friends over lan!
+
+
+# AI USAGE NOTICE
+
+Straight up, AI was used in the making of this. To a point of admitting that without it, this and sys-zerotier wouldnt be a reality,
+but both were tested in controlled environments (my own switch over atleast 13 days of testing or so ive counted) and the technologies used
+are proven projects in other uses (This being a fork of switch-lan-play, ZeroTier for the networking, and open source vpn system, etc..).
