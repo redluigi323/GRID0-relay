@@ -20,9 +20,21 @@ static const char *capture_suffixes[5] = {
     "wifi-rx", "wifi-tx", "zerotier-rx", "zerotier-tx", "host"
 };
 
+static void flush_capture(struct lan_play *lp, int i)
+{
+    if (!lp->captures[i]) return;
+    if (pcap_dump_flush(lp->captures[i]) != 0) {
+        LLOG(LLOG_ERROR, "Capture write failed: %s", capture_suffixes[i]);
+        pcap_dump_close(lp->captures[i]);
+        lp->captures[i] = NULL;
+    }
+    lp->capture_pending[i] = 0;
+}
+
 static void close_captures(struct lan_play *lp)
 {
     for (int i = 0; i < 5; ++i) {
+        flush_capture(lp, i);
         if (lp->captures[i]) pcap_dump_close(lp->captures[i]);
         lp->captures[i] = NULL;
     }
@@ -37,6 +49,8 @@ static int open_captures(struct lan_play *lp)
     if (!lp->capture_format) return -1;
     lp->capture_start_time = time(NULL);
     lp->capture_start_ns = uv_hrtime();
+    memset(lp->capture_pending, 0, sizeof(lp->capture_pending));
+    memset(lp->capture_last_flush_us, 0, sizeof(lp->capture_last_flush_us));
     for (int i = 0; i < 5; ++i) {
         char path[4096];
         int n = snprintf(path, sizeof(path), "%s-%s.pcap",
@@ -95,10 +109,12 @@ static void capture_frame(struct lan_play *lp, const char *direction,
     h.ts.tv_usec = elapsed_us % 1000000;
     h.caplen = h.len = (bpf_u_int32)len;
     pcap_dump((u_char *)lp->captures[index], &h, packet);
-    if (pcap_dump_flush(lp->captures[index]) != 0) {
-        LLOG(LLOG_ERROR, "Capture write failed: %s", capture_suffixes[index]);
-        pcap_dump_close(lp->captures[index]);
-        lp->captures[index] = NULL;
+    // Keep diagnostic disk writes off the per-packet path. Flush on activity
+    // after 100 ms or 32 records, and flush every remaining record on shutdown.
+    if (++lp->capture_pending[index] >= 32 ||
+        elapsed_us - lp->capture_last_flush_us[index] >= 100000) {
+        flush_capture(lp, index);
+        lp->capture_last_flush_us[index] = elapsed_us;
     }
 }
 
@@ -462,6 +478,10 @@ int lan_play_close(struct lan_play *lan_play)
     native_udp_guard_close(lan_play->udp_guard);
     lan_play->udp_guard = NULL;
     if (options.diagnostics) {
+        LLOG(LLOG_INFO, "Local return-path conflicts ignored: %llu; MAC learned from %s",
+            (unsigned long long)lan_play->switch_mac_conflicts,
+            !lan_play->switch_seen ? "no candidate" :
+            lan_play->switch_mac_confirmed ? "ARP/broadcast" : "provisional unicast");
         LLOG(LLOG_INFO, "Traffic summary: Wi-Fi RX ARP=%llu IPv4=%llu TX=%llu probes=%llu; ZeroTier RX ARP=%llu IPv4=%llu TX=%llu",
             (unsigned long long)lan_play->wifi_arp_rx, (unsigned long long)lan_play->wifi_ipv4_rx, (unsigned long long)lan_play->wifi_tx, (unsigned long long)lan_play->wifi_probe_tx,
             (unsigned long long)lan_play->zerotier_arp_rx, (unsigned long long)lan_play->zerotier_ipv4_rx, (unsigned long long)lan_play->zerotier_tx);
@@ -483,6 +503,61 @@ int lan_play_close(struct lan_play *lan_play)
     return 0;
 }
 
+/* Unicast may arrive with an AP/proxy Ethernet source. Use it provisionally,
+ * then prefer an ARP claim or subnet broadcast; never chase each unicast MAC.
+ * This is delivery evidence, not proof of a device's manufacturer/identity. */
+static bool learn_local_switch(struct lan_play *lp, const uint8_t *frame, size_t len)
+{
+    static const uint8_t all[6] = {255,255,255,255,255,255};
+    static const uint8_t zero[6] = {0};
+    if (len < ETHER_HEADER_LEN || (frame[6] & 1) || CMP_MAC(frame + 6, zero)) return false;
+    const uint8_t *body = frame + ETHER_HEADER_LEN, *ip = NULL;
+    bool direct = false;
+    uint16_t type = READ_NET16(frame, ETHER_OFF_TYPE);
+    if (type == ETHER_TYPE_ARP) {
+        if (len < ETHER_HEADER_LEN + ARP_LEN || READ_NET16(body, ARP_OFF_HARDWARE) != 1 ||
+            READ_NET16(body, ARP_OFF_PROTOCOL) != ETHER_TYPE_IPV4 || body[4] != 6 || body[5] != 4 ||
+            (READ_NET16(body, ARP_OFF_OPCODE) != ARP_OPCODE_REQUEST &&
+             READ_NET16(body, ARP_OFF_OPCODE) != ARP_OPCODE_REPLY) ||
+            !CMP_MAC(body + ARP_OFF_SENDER_MAC, frame + 6)) return false;
+        ip = body + ARP_OFF_SENDER_IP;
+        direct = true;
+    } else if (type == ETHER_TYPE_IPV4) {
+        if (len < ETHER_HEADER_LEN + IPV4_HEADER_LEN || (body[0] >> 4) != 4) return false;
+        size_t header = (body[0] & 15) * 4, total = READ_NET16(body, IPV4_OFF_TOTAL_LEN);
+        if (header < IPV4_HEADER_LEN || total < header || total > len - ETHER_HEADER_LEN) return false;
+        ip = body + IPV4_OFF_SRC;
+        direct = CMP_MAC(frame, all) &&
+            (CMP_IPV4(body + IPV4_OFF_DST, lp->zerotier_broadcast_ip) ||
+             is_nintendo_lan_broadcast(body + IPV4_OFF_DST));
+    } else return false;
+    if (!is_zerotier_destination(lp, ip) || CMP_IPV4(ip, lp->zerotier_broadcast_ip) ||
+        CMP_IPV4(ip, lp->packet_ctx.ip)) return false;
+    bool network = true;
+    for (int i = 0; i < 4; ++i) if (ip[i] & (uint8_t)~lp->zerotier_netmask[i]) network = false;
+    if (network) return false;
+    if (lp->switch_seen && !CMP_IPV4(ip, lp->switch_ip)) return false;
+    bool changed = !lp->switch_seen || !CMP_MAC(frame + 6, lp->switch_mac);
+    if (lp->switch_seen && changed && (lp->switch_mac_confirmed || !direct)) {
+        if (++lp->switch_mac_conflicts == 1)
+            LLOG(LLOG_WARNING, "Local Switch IP %u.%u.%u.%u also arrived from MAC %02x:%02x:%02x:%02x:%02x:%02x; keeping return MAC %02x:%02x:%02x:%02x:%02x:%02x. Check for an AP/proxy or duplicate IP; restart the relay after changing consoles.",
+                ip[0], ip[1], ip[2], ip[3], frame[6], frame[7], frame[8], frame[9], frame[10], frame[11],
+                lp->switch_mac[0], lp->switch_mac[1], lp->switch_mac[2], lp->switch_mac[3], lp->switch_mac[4], lp->switch_mac[5]);
+        return true; /* Keep forwarding this IP's datagrams; do not pin its ingress path. */
+    }
+    CPY_IPV4(lp->switch_ip, ip);
+    CPY_MAC(lp->switch_mac, frame + 6);
+    lp->switch_seen = true;
+    lp->switch_mac_confirmed |= direct;
+    if (changed && (options.diagnostics || options.status_events))
+        LLOG(LLOG_INFO, "Detected local Switch candidate: %u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x)",
+            ip[0], ip[1], ip[2], ip[3], frame[6], frame[7], frame[8], frame[9], frame[10], frame[11]);
+    if (changed && options.diagnostics && !CMP_IPV4(ip, lp->zerotier_ip))
+        LLOG(LLOG_WARNING, "For Splatoon with sys-zerotier, configure the stock Switch address as the managed ZeroTier address %u.%u.%u.%u",
+            lp->zerotier_ip[0], lp->zerotier_ip[1], lp->zerotier_ip[2], lp->zerotier_ip[3]);
+    return true;
+}
+
 void lan_play_pcap_handler(uv_pcap_t *handle, const struct pcap_pkthdr *pkt_header, const u_char *packet, const uint8_t *mac)
 {
     struct lan_play *lan_play = handle->data;
@@ -495,36 +570,7 @@ void lan_play_pcap_handler(uv_pcap_t *handle, const struct pcap_pkthdr *pkt_head
     diagnostic_count_rx(lan_play, false, packet, pkt_header->caplen);
     diagnostic_log_frame(lan_play, "RX Wi-Fi", packet, pkt_header->caplen);
     if (consume_wifi_delivery_reply(lan_play, packet, pkt_header->caplen)) return;
-    if (pkt_header->caplen >= ETHER_HEADER_LEN) {
-        uint16_t type = READ_NET16(packet, ETHER_OFF_TYPE);
-        if (type == ETHER_TYPE_ARP && pkt_header->caplen >= ETHER_HEADER_LEN + ARP_LEN) {
-            bool changed = !lan_play->switch_seen || !CMP_MAC(lan_play->switch_mac, packet + ETHER_OFF_SRC) ||
-                           !CMP_IPV4(lan_play->switch_ip, packet + ETHER_HEADER_LEN + ARP_OFF_SENDER_IP);
-            CPY_MAC(lan_play->switch_mac, packet + ETHER_OFF_SRC);
-            CPY_IPV4(lan_play->switch_ip, packet + ETHER_HEADER_LEN + ARP_OFF_SENDER_IP);
-            lan_play->switch_seen = true;
-            if ((options.diagnostics || options.status_events) && changed) LLOG(LLOG_INFO, "Detected local Switch candidate: %u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x)",
-                lan_play->switch_ip[0], lan_play->switch_ip[1], lan_play->switch_ip[2], lan_play->switch_ip[3],
-                lan_play->switch_mac[0], lan_play->switch_mac[1], lan_play->switch_mac[2], lan_play->switch_mac[3], lan_play->switch_mac[4], lan_play->switch_mac[5]);
-            if (options.diagnostics && !CMP_IPV4(lan_play->switch_ip, lan_play->zerotier_ip)) {
-                LLOG(LLOG_WARNING, "For Splatoon with sys-zerotier, configure the stock Switch address as the managed ZeroTier address %u.%u.%u.%u",
-                    lan_play->zerotier_ip[0], lan_play->zerotier_ip[1], lan_play->zerotier_ip[2], lan_play->zerotier_ip[3]);
-            }
-        } else if (type == ETHER_TYPE_IPV4 && pkt_header->caplen >= ETHER_HEADER_LEN + IPV4_HEADER_LEN) {
-            bool changed = !lan_play->switch_seen || !CMP_MAC(lan_play->switch_mac, packet + ETHER_OFF_SRC) ||
-                           !CMP_IPV4(lan_play->switch_ip, packet + ETHER_HEADER_LEN + IPV4_OFF_SRC);
-            CPY_MAC(lan_play->switch_mac, packet + ETHER_OFF_SRC);
-            CPY_IPV4(lan_play->switch_ip, packet + ETHER_HEADER_LEN + IPV4_OFF_SRC);
-            lan_play->switch_seen = true;
-            if ((options.diagnostics || options.status_events) && changed) LLOG(LLOG_INFO, "Detected local Switch candidate: %u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x)",
-                lan_play->switch_ip[0], lan_play->switch_ip[1], lan_play->switch_ip[2], lan_play->switch_ip[3],
-                lan_play->switch_mac[0], lan_play->switch_mac[1], lan_play->switch_mac[2], lan_play->switch_mac[3], lan_play->switch_mac[4], lan_play->switch_mac[5]);
-            if (options.diagnostics && !CMP_IPV4(lan_play->switch_ip, lan_play->zerotier_ip)) {
-                LLOG(LLOG_WARNING, "For Splatoon with sys-zerotier, configure the stock Switch address as the managed ZeroTier address %u.%u.%u.%u",
-                    lan_play->zerotier_ip[0], lan_play->zerotier_ip[1], lan_play->zerotier_ip[2], lan_play->zerotier_ip[3]);
-            }
-        }
-    }
+    if (!learn_local_switch(lan_play, packet, pkt_header->caplen)) return;
     packet_set_mac(&lan_play->packet_ctx, mac);
     if (pkt_header->caplen >= ETHER_HEADER_LEN + IPV4_HEADER_LEN &&
         READ_NET16(packet, ETHER_OFF_TYPE) == ETHER_TYPE_IPV4 &&

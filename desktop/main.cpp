@@ -40,7 +40,7 @@ int grid0RelayMain(int argc, char **argv) {
 #endif
     QApplication app(argc, argv);
     startupLog("QApplication created");
-    app.setOrganizationName("GRID0 Relay"); app.setApplicationName("GRID0Relay"); app.setApplicationVersion("0.6.8");
+    app.setOrganizationName("GRID0 Relay"); app.setApplicationName("GRID0Relay"); app.setApplicationVersion("0.6.10");
 #ifdef Q_OS_WIN
     // Qt's Windows 11 style supports system light/dark and high-contrast themes.
     if (QStyleFactory::keys().contains("windows11", Qt::CaseInsensitive)) app.setStyle("windows11");

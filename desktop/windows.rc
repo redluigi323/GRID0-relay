@@ -2,8 +2,8 @@
 1 RT_MANIFEST "windows.manifest"
 1 ICON "windows.ico"
 1 VERSIONINFO
-FILEVERSION 0,6,8,0
-PRODUCTVERSION 0,6,8,0
+FILEVERSION 0,6,10,0
+PRODUCTVERSION 0,6,10,0
 FILETYPE VFT_APP
 BEGIN
   BLOCK "StringFileInfo"
@@ -12,8 +12,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "GRID0 Relay"
       VALUE "ProductName", "GRID0 Relay"
-      VALUE "FileVersion", "0.6.8"
-      VALUE "ProductVersion", "0.6.8"
+      VALUE "FileVersion", "0.6.10"
+      VALUE "ProductVersion", "0.6.10"
       VALUE "OriginalFilename", "GRID0Relay.exe"
     END
   END

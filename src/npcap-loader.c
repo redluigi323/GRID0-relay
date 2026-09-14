@@ -5,6 +5,8 @@
 pcap_t * (*zll_pcap_create)(const char *name, char *err);
 int (*zll_pcap_set_timeout)(pcap_t *p, int value);
 int (*zll_pcap_set_snaplen)(pcap_t *p, int value);
+int (*zll_pcap_set_buffer_size)(pcap_t *p, int value);
+int (*zll_pcap_stats)(pcap_t *p, struct pcap_stat *stats);
 int (*zll_pcap_set_promisc)(pcap_t *p, int value);
 int (*zll_pcap_setmintocopy)(pcap_t *p, int value);
 int (*zll_pcap_activate)(pcap_t *p);
@@ -55,6 +57,8 @@ int zll_npcap_load(char *error, size_t size)
     RESOLVE(pcap_create);
     RESOLVE(pcap_set_timeout);
     RESOLVE(pcap_set_snaplen);
+    RESOLVE(pcap_set_buffer_size);
+    RESOLVE(pcap_stats);
     RESOLVE(pcap_set_promisc);
     RESOLVE(pcap_setmintocopy);
     RESOLVE(pcap_activate);

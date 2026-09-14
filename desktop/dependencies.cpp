@@ -55,7 +55,7 @@ static bool downloadWithWinHttp(const QUrl &url, QSaveFile *output, QString *err
     const std::wstring host = url.host().toStdWString();
     const std::wstring path = (url.path(QUrl::FullyEncoded) +
                                (url.query().isEmpty() ? QString() : "?" + url.query(QUrl::FullyEncoded))).toStdWString();
-    HINTERNET session = WinHttpOpen(L"GRID0 Relay/0.6.8", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    HINTERNET session = WinHttpOpen(L"GRID0 Relay/0.6.10", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                     WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) { *error = "Windows could not initialize its secure download service."; return false; }
     HINTERNET connection = WinHttpConnect(session, host.c_str(), INTERNET_DEFAULT_HTTPS_PORT, 0);

@@ -13,6 +13,10 @@ extern int (*zll_pcap_set_timeout)(pcap_t *p, int value);
 #define pcap_set_timeout zll_pcap_set_timeout
 extern int (*zll_pcap_set_snaplen)(pcap_t *p, int value);
 #define pcap_set_snaplen zll_pcap_set_snaplen
+extern int (*zll_pcap_set_buffer_size)(pcap_t *p, int value);
+#define pcap_set_buffer_size zll_pcap_set_buffer_size
+extern int (*zll_pcap_stats)(pcap_t *p, struct pcap_stat *stats);
+#define pcap_stats zll_pcap_stats
 extern int (*zll_pcap_set_promisc)(pcap_t *p, int value);
 #define pcap_set_promisc zll_pcap_set_promisc
 extern int (*zll_pcap_setmintocopy)(pcap_t *p, int value);

@@ -65,3 +65,15 @@ with tempfile.TemporaryDirectory(prefix='zll-tests-') as tmp:
         '-lpthread', '-o', str(udp_binary)
     ], check=True)
     subprocess.run([str(udp_binary)], check=True)
+    io_binary = pathlib.Path(tmp) / 'pcap-io-test'
+    io_cmd = ['c++', '-std=c++17', '-g', '-ffunction-sections', '-fdata-sections',
+              '-UNDEBUG', '-DLANPLAY_LITTLE_ENDIAN',
+              '-DLANPLAY_DARWIN' if sys.platform == 'darwin' else '-DLANPLAY_LINUX']
+    for include in ('base/include', 'external/libuv/include'):
+        io_cmd += ['-I' + str(root / include)]
+    io_cmd += [str(root / 'tests/pcap_io_test.cpp'), str(build / 'base/libbase.a'),
+               str(build / 'external/libuv/libuv_a.a'), '-lpcap', '-lpthread',
+               '-Wl,-dead_strip' if sys.platform == 'darwin' else '-Wl,--gc-sections',
+               '-o', str(io_binary)]
+    subprocess.run(io_cmd, check=True)
+    subprocess.run([str(io_binary)], check=True)

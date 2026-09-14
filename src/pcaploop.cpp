@@ -34,6 +34,10 @@ struct uv_pcap_interf_s {
     uint8_t ipv4[4];
     uint8_t netmask[4];
     bool has_ipv4;
+    uint64_t delivered;
+    uint64_t send_failures;
+    uint64_t read_failures;
+    uint64_t full_batches;
 
     void *data;
 };
@@ -84,6 +88,7 @@ static int set_filter(pcap_t *dev, const uint8_t *mac, const char *subnet)
 
 static void uv_pcap_callback(uv_pcap_interf_t *h, const struct pcap_pkthdr *pkt_header, const u_char *packet) {
     uv_pcap_t *handle = (uv_pcap_t *)h->data;
+    ++h->delivered;
     if (pkt_header->caplen < 14) return;
     auto key = mac2int(packet + 0);
     handle->inner->map[key] = h;
@@ -93,7 +98,7 @@ int uv_pcap_sendpacket(uv_pcap_t *handle, const u_char *data, int size)
 {
     auto inner = handle->inner;
     auto key = mac2int(data + 6);
-    auto map = inner->map;
+    const auto &map = inner->map;
 
     auto search = map.find(key);
 
@@ -180,10 +185,11 @@ int uv_pcap_open_live(
         LLOG(LLOG_DEBUG, "open %s fail: pcap_set_snaplen", d->name);
         goto fail;
     }
-    // if (pcap_set_buffer_size(dev, 100000)) {
-    //     LLOG(LLOG_DEBUG, "open %s fail: pcap_set_buffer_size", d->name);
-    //     goto fail;
-    // }
+#ifdef _WIN32
+    // Absorb short scheduling/disk stalls without changing immediate delivery.
+    stage = "pcap_set_buffer_size";
+    if (pcap_set_buffer_size(dev, 4 * 1024 * 1024) != 0) goto fail;
+#endif
     stage = "pcap_set_promisc";
     if (pcap_set_promisc(dev, 1)) {
         LLOG(LLOG_DEBUG, "open %s fail: pcap_set_promisc", d->name);
@@ -333,6 +339,17 @@ void uv_pcap_close(uv_pcap_t *handle)
     auto inner = handle->inner;
     inner->map.clear();
     for (int i = 0; i < inner->count; i++) {
+        auto *h = &inner->interfaces[i];
+        struct pcap_stat stats = {};
+        LLOG(LLOG_INFO, "Capture health MAC %02x:%02x:%02x:%02x:%02x:%02x: delivered=%llu read-errors=%llu injection-errors=%llu full-batches=%llu",
+            h->mac[0], h->mac[1], h->mac[2], h->mac[3], h->mac[4], h->mac[5],
+            (unsigned long long)h->delivered, (unsigned long long)h->read_failures,
+            (unsigned long long)h->send_failures, (unsigned long long)h->full_batches);
+        if (pcap_stats(h->dev, &stats) == 0)
+            LLOG(LLOG_INFO, "Capture driver counters: received=%u buffer-drops=%u interface-drops=%u (platform-dependent; zero can mean unavailable, not proof of delivery)",
+                stats.ps_recv, stats.ps_drop, stats.ps_ifdrop);
+        else
+            LLOG(LLOG_INFO, "Capture driver counters unavailable: %s", pcap_geterr(h->dev));
         uv_pcap_interf_close(&inner->interfaces[i], NULL);
     }
     printf("pcap loop stop\n");
@@ -345,6 +362,7 @@ static int uv_pcap_interf_sendpacket(uv_pcap_interf_t *handle, const u_char *dat
     CPY_MAC(old, d + 6);
     CPY_MAC(d + 6, handle->mac);
     int ret = pcap_sendpacket(handle->dev, data, size);
+    if (ret != 0) ++handle->send_failures;
     CPY_MAC(d + 6, old);
 
     return ret;
@@ -398,6 +416,11 @@ static void poll_handler(uv_poll_t *poll, int status, int events)
         do {
             count = pcap_dispatch(handle->dev, 1, poll_callback, (u_char *)handle);
         } while (count > 0);
+        if (count == PCAP_ERROR) {
+            ++handle->read_failures;
+            LLOG(LLOG_ERROR, "Capture read failed: %s", pcap_geterr(handle->dev));
+            uv_poll_stop(poll);
+        }
     }
 }
 
@@ -413,7 +436,9 @@ static void capture_timer_cb(uv_timer_t *timer)
     auto *h = static_cast<uv_pcap_interf_t *>(timer->data);
     // Bounded batches leave room for the other adapter and shutdown timers.
     int ret = pcap_dispatch(h->dev, 128, timer_packet, reinterpret_cast<u_char *>(h));
+    if (ret == 128) ++h->full_batches;
     if (ret < 0) {
+        ++h->read_failures;
         LLOG(LLOG_ERROR, "Npcap capture failed: %s", pcap_geterr(h->dev));
         uv_timer_stop(timer);
     }

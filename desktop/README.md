@@ -12,6 +12,14 @@ Qt 6 Widgets supplies the native style, fonts, palette, dialogs and controls. Th
 
 A detected device is a console candidate inferred from local traffic, not vendor-authenticated hardware identity. Runtime errors and a broadcast-mask mismatch are shown on Play; detailed logs remain under Advanced.
 
+Some access points forward a console's unicast traffic with a different Ethernet source address. The relay prefers an ARP claim or LAN broadcast when choosing the console's return address, then keeps that address stable for the session. Alternate sources for the same IP are still forwarded and counted in diagnostics. If you change consoles or the console's IP, stop and restart the relay. A conflicting address can also mean a duplicate IP, so keep only one local console on the displayed address.
+
+IPv6 can remain enabled on the console and PC. GRID0 forwards the game's IPv4 LAN traffic; it does not tunnel IPv6 or use IPv6 packets to select the console's IPv4 return address.
+
+After stopping, the log includes capture health for each adapter MAC: packets delivered to the relay, read/injection errors, and driver buffer/interface drop counters. Driver counter meanings vary by platform; a zero may mean unavailable and does not prove delivery to another console. Full batches count Windows capture reads that reached the 128-packet batch limit, not dropped packets. Windows requests a 4 MiB capture buffer per adapter to absorb brief stalls while keeping immediate capture enabled. See [Npcap's counter definitions](https://npcap.com/guide/wpcap/pcap_stats.html).
+
+Packet recording batches disk flushes after 32 records or on traffic after 100 ms. Normal shutdown flushes every remaining record. A forced kill or crash can lose the final buffered records (up to 31 per capture file), so stop the relay normally before exporting a report.
+
 The custom relay field in Advanced is optional. Clearing it restores the bundled relay. Default paths are resolved at launch, so moving the app does not break that setting.
 
 ## Diagnostics and reports

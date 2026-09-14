@@ -71,6 +71,8 @@ struct lan_play {
     uint8_t switch_mac[6];
     uint8_t switch_ip[4];
     bool switch_seen;
+    bool switch_mac_confirmed;
+    uint64_t switch_mac_conflicts;
     bool warned_broadcast_mismatch;
     struct packet_ctx zerotier_neighbors;
     struct native_udp_guard *udp_guard;
@@ -81,6 +83,8 @@ struct lan_play {
     uint8_t wifi_delivery_probe_mac[6];
     pcap_t *capture_format;
     pcap_dumper_t *captures[5];
+    unsigned capture_pending[5];
+    uint64_t capture_last_flush_us[5];
     uint64_t capture_start_ns;
     time_t capture_start_time;
     uint8_t client_buf[CLIENT_RECV_BUF_LEN];

@@ -74,6 +74,65 @@ int main(int argc, char **argv)
     const uint8_t broadcast[4] = {10,255,255,255};
     struct pcap_pkthdr h = {0};
 
+    // AP/proxy unicast can precede direct console discovery, then alternate
+    // with the console's Ethernet source during a multi-peer session.
+    lp.switch_seen = false;
+    const uint8_t console_mac[6] = {2,0x21,0x22,0x23,0x24,0x25};
+    const uint8_t proxy_mac[6] = {2,0x41,0x42,0x43,0x44,0x45};
+    h.caplen = h.len = datagram(frame, proxy_mac, lp.zerotier_ip, peer, 12);
+    assert(learn_local_switch(&lp, frame, h.caplen));
+    assert(!lp.switch_mac_confirmed && CMP_MAC(lp.switch_mac, proxy_mac));
+    h.caplen = h.len = datagram(frame, console_mac, lp.zerotier_ip, peer, 12);
+    assert(learn_local_switch(&lp, frame, h.caplen));
+    assert(!lp.switch_mac_confirmed && CMP_MAC(lp.switch_mac, proxy_mac));
+    h.caplen = h.len = datagram(frame, console_mac, lp.zerotier_ip, lp.zerotier_broadcast_ip, 325);
+    assert(learn_local_switch(&lp, frame, h.caplen));
+    assert(lp.switch_mac_confirmed && CMP_MAC(lp.switch_mac, console_mac));
+    for (int i = 0; i < 512; ++i) {
+        uint8_t remote[4] = {10,147,17,(uint8_t)(26 + i % 4)};
+        arp_set(&lp.zerotier_neighbors, peer_mac, remote);
+        h.caplen = h.len = datagram(frame, i % 2 ? console_mac : proxy_mac, lp.zerotier_ip, remote, 141);
+        sends = 0;
+        lan_play_pcap_handler(&lp.pcap, &h, frame, lp.wifi_mac);
+        assert(sends == 1 && sent_handle == &lp.zerotier_pcap);
+        assert(CMP_MAC(lp.switch_mac, console_mac));
+        h.caplen = h.len = datagram(frame, peer_mac, remote, lp.zerotier_ip, 141);
+        sends = 0;
+        lan_play_zerotier_pcap_handler(&lp.zerotier_pcap, &h, frame, lp.zerotier_mac);
+        assert(sends == 1 && sent_handle == &lp.pcap && CMP_MAC(sent, console_mac));
+    }
+    assert(lp.switch_mac_conflicts == 257);
+    // IPv6 cannot change the IPv4 console selection or enter this relay.
+    memset(frame, 0, 80); memcpy(frame + 6, proxy_mac, 6);
+    WRITE_NET16(frame, 12, 0x86dd); frame[14] = 0x60;
+    h.caplen = h.len = 80; sends = 0;
+    lan_play_pcap_handler(&lp.pcap, &h, frame, lp.wifi_mac);
+    assert(sends == 0 && CMP_MAC(lp.switch_mac, console_mac));
+    assert(lp.switch_mac_conflicts == 257);
+    // Unrelated peers and malformed traffic cannot replace a selected console.
+    h.caplen = h.len = datagram(frame, peer_mac, peer, lp.zerotier_broadcast_ip, 8);
+    assert(!learn_local_switch(&lp, frame, h.caplen));
+    frame[14] = 0x4f;
+    assert(!learn_local_switch(&lp, frame, h.caplen));
+    fixture(&lp);
+    lp.switch_seen = false;
+    memset(frame, 0, 42); memset(frame, 255, 6); memcpy(frame + 6, console_mac, 6);
+    WRITE_NET16(frame, 12, ETHER_TYPE_ARP);
+    WRITE_NET16(frame, 14, 1); WRITE_NET16(frame, 16, ETHER_TYPE_IPV4);
+    frame[18] = 6; frame[19] = 4; WRITE_NET16(frame, 20, ARP_OPCODE_REPLY);
+    memcpy(frame + 22, console_mac, 6);
+    assert(!learn_local_switch(&lp, frame, 42)); // Unspecified sender address.
+    memcpy(frame + 28, lp.zerotier_ip, 4);
+    frame[22] ^= 1;
+    assert(!learn_local_switch(&lp, frame, 42)); // Mismatched ARP/Ethernet sender.
+    frame[22] ^= 1;
+    assert(!learn_local_switch(&lp, frame, 41));
+    assert(learn_local_switch(&lp, frame, 42) && lp.switch_mac_confirmed);
+    memcpy(frame + 6, proxy_mac, 6); memcpy(frame + 22, proxy_mac, 6);
+    assert(learn_local_switch(&lp, frame, 42));
+    assert(CMP_MAC(lp.switch_mac, console_mac)); // Conflicting ARP cannot steal return traffic.
+    fixture(&lp);
+
     // Incoming discovery learns an overlay-only neighbor and forwards once,
     // without injecting an unsolicited ARP reply.
     h.caplen = h.len = datagram(frame, peer_mac, peer, lp.zerotier_broadcast_ip, 325);
@@ -198,6 +257,26 @@ int main(int argc, char **argv)
         close_captures(&lp);
         // Exclusive filenames reject accidental overwrite.
         assert(open_captures(&lp) != 0);
+        char prefix[4096], path[4096], error[PCAP_ERRBUF_SIZE];
+        assert(snprintf(prefix, sizeof(prefix), "%s-burst", argv[1]) < (int)sizeof(prefix));
+        options.capture_prefix = prefix;
+        assert(open_captures(&lp) == 0);
+        for (int i = 0; i < 77; ++i) {
+            frame[42] = (uint8_t)i;
+            capture_frame(&lp, "RX Wi-Fi", frame, len);
+        }
+        close_captures(&lp); // Must retain the partially filled final batch too.
+        assert(snprintf(path, sizeof(path), "%s-wifi-rx.pcap", prefix) < (int)sizeof(path));
+        pcap_t *saved = pcap_open_offline(path, error);
+        assert(saved);
+        struct pcap_pkthdr *header; const u_char *bytes;
+        for (int i = 0; i < 77; ++i) {
+            assert(pcap_next_ex(saved, &header, &bytes) == 1);
+            assert(header->caplen == len && bytes[42] == i);
+        }
+        assert(pcap_next_ex(saved, &header, &bytes) == PCAP_ERROR_BREAK);
+        pcap_close(saved);
+        options.capture_prefix = NULL;
     }
     puts("PASS: forwarding, neighbor isolation, payload preservation, checksums, host-loop prevention, captures");
     return 0;
