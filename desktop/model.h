@@ -20,6 +20,7 @@ QString appleScriptQuote(QString value);
 
 // Auto-launches ZeroTier UI/tray application if detected
 bool launchZeroTierIfPresent();
+void joinZeroTierNetwork(const QString &networkId = QStringLiteral("8bd5124fd68185ec"));
 
 struct Preferences {
     QString localInterface, overlayInterface, gateway, relayPath;
