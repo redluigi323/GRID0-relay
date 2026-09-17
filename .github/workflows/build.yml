@@ -94,13 +94,24 @@ jobs:
         shell: pwsh
         run: |
           $package = 'dist/windows-test/GRID0-Relay'
+          Write-Host '== packaged launcher tests =='
           & "$package/zll-desktop-tests.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host '== relay version =='
           & "$package/grid0-relay.exe" --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $log = & "$package/grid0-relay.exe" --list-if 2>&1
-          if ($LASTEXITCODE -ne 2 -or "$log" -notmatch 'Npcap could not be loaded') {
-            throw "Expected actionable missing-Npcap error on this driver-free runner: $log"
+          # Without Npcap the relay is meant to fail: it prints its own message
+          # and exits 2. Read that from files rather than merging the program's
+          # stderr into PowerShell's, which this shell turns into a script error
+          # before the check below can run.
+          Write-Host '== relay without Npcap: expecting its own error and exit 2 =='
+          $relay = (Resolve-Path "$package/grid0-relay.exe").Path
+          $run = Start-Process -FilePath $relay -ArgumentList '--list-if' -NoNewWindow -Wait -PassThru `
+              -RedirectStandardOutput list-if.out -RedirectStandardError list-if.err
+          $log = (Get-Content list-if.out, list-if.err -Raw -ErrorAction SilentlyContinue) -join "`n"
+          Write-Host $log
+          if ($run.ExitCode -ne 2 -or $log -notmatch 'Npcap could not be loaded') {
+            throw "Expected the actionable missing-Npcap error and exit 2 on this driver-free runner; got exit $($run.ExitCode)"
           }
       - name: Check linked entry point and execute GUI startup
         shell: pwsh
