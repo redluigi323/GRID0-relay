@@ -27,6 +27,20 @@ def main():
                     '--objdump', args.compiler.replace('g++', 'objdump')], check=True)
     if args.output.exists(): parser.error('Use a fresh output directory; existing packages are never overwritten.')
     if not args.qt_source.is_file(): parser.error('The matching Qt source archive is required.')
+    # Prefer the compiler actually used, not a potentially older runtime in Qt.
+    # A cross toolchain keeps libstdc++-6.dll in its library directory, while
+    # MSYS2 keeps it beside the compiler and GCC then prints the bare filename
+    # it could not resolve. Search both rather than trusting that one answer.
+    compiler_path = Path(shutil.which(args.compiler)).resolve()
+    printed = Path(subprocess.check_output([args.compiler, '-print-file-name=libstdc++-6.dll'], text=True).strip())
+    search = [compiler_path.parent, compiler_path.parent.parent / 'bin', args.qt / 'bin']
+    if printed.is_absolute() and printed.is_file():
+        runtime = printed.resolve().parent
+        search[:0] = [runtime, runtime.parent / 'bin']
+    search = list(dict.fromkeys(search))
+    if not any((directory / 'libstdc++-6.dll').is_file() for directory in search[:-1]):
+        parser.error('Cannot locate the selected MinGW compiler runtime (libstdc++-6.dll). Checked: ' +
+                     ', '.join(str(directory) for directory in search[:-1]))
     app = args.output / 'GRID0-Relay'
     app.mkdir(parents=True)
     for name in ['Grid0Relay.exe', 'grid0-relay.exe'] + (['zll-desktop-tests.exe', 'zll-test-relay.exe', 'zll-startup-test.exe', 'zll-layout-tests.exe'] if args.include_tests else []):
@@ -36,11 +50,6 @@ def main():
         dest = app / 'plugins' / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(args.qt / 'plugins' / name, dest)
-    # Prefer the compiler actually used, not a potentially older runtime in Qt.
-    runtime = Path(subprocess.check_output([args.compiler, '-print-file-name=libstdc++-6.dll'], text=True).strip()).resolve()
-    if not runtime.is_file(): parser.error('Cannot locate the selected MinGW compiler runtime.')
-    compiler_path = Path(shutil.which(args.compiler)).resolve()
-    search = [runtime.parent, runtime.parent.parent / 'bin', compiler_path.parent, args.qt / 'bin']
     candidates = {}
     for directory in search:
         for path in directory.glob('*.dll'): candidates.setdefault(path.name.lower(), path)

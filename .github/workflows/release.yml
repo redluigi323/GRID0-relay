@@ -65,11 +65,11 @@ jobs:
           python-version: '3.12'
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
       - name: Select native MinGW tools
         shell: pwsh
-        run: '"C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append'
+        run: '"C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append'
       - name: Fetch pinned SDKs
         run: python scripts/fetch-windows-deps.py --with-qt
       - name: Build and package
