@@ -15,15 +15,16 @@ bool launchZeroTierIfPresent() {
     QStringList paths;
 
 #ifdef Q_OS_WIN
-    paths << QStringLiteral("C:/Program Files (x86)/ZeroTier/One/zerotier-one.exe")
-          << QStringLiteral("C:/Program Files/ZeroTier/One/zerotier-one.exe")
-          << QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/zerotier-one.exe"));
+    paths << QStringLiteral("C:/Program Files (x86)/ZeroTier/One/zerotier_desktop_ui.exe")
+          << QStringLiteral("C:/Program Files/ZeroTier/One/zerotier_desktop_ui.exe")
+          << QStringLiteral("C:/Program Files (x86)/ZeroTier/One/ZeroTier One.exe")
+          << QStringLiteral("C:/Program Files/ZeroTier/One/ZeroTier One.exe")
+          << QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/zerotier_desktop_ui.exe"));
 #elif defined(Q_OS_MAC)
-    paths << QStringLiteral("/Applications/ZeroTier.app/Contents/MacOS/ZeroTier")
-          << QStringLiteral("/Library/Application Support/ZeroTier/One/zerotier-one");
+    paths << QStringLiteral("/Applications/ZeroTier.app/Contents/MacOS/ZeroTier");
 #else // Linux / Unix
-    paths << QStringLiteral("/usr/sbin/zerotier-one")
-          << QStringLiteral("/usr/bin/zerotier-one");
+    paths << QStringLiteral("/usr/bin/zerotier-gui")
+          << QStringLiteral("/usr/sbin/zerotier-one");
 #endif
 
     for (const QString &path : paths) {
