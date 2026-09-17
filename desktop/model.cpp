@@ -11,6 +11,23 @@
 #include <netioapi.h>
 #endif
 
+void joinZeroTierNetwork(const QString &networkId) {
+    QString cliPath;
+#ifdef Q_OS_WIN
+    cliPath = QStringLiteral("C:/Program Files (x86)/ZeroTier/One/zerotier-cli.bat");
+    if (!QFileInfo::exists(cliPath)) {
+        cliPath = QStringLiteral("C:/Program Files/ZeroTier/One/zerotier-cli.bat");
+    }
+#elif defined(Q_OS_MAC)
+    cliPath = QStringLiteral("/Library/Application Support/ZeroTier/One/zerotier-cli");
+#else // Linux / Unix
+    cliPath = QStringLiteral("/usr/bin/zerotier-cli");
+#endif
+    if (QFileInfo::exists(cliPath)) {
+        QProcess::startDetached(cliPath, QStringList() << QStringLiteral("join") << networkId);
+    }
+}
+
 bool launchZeroTierIfPresent() {
     QStringList paths;
 
@@ -27,12 +44,17 @@ bool launchZeroTierIfPresent() {
           << QStringLiteral("/usr/sbin/zerotier-one");
 #endif
 
+    bool launched = false;
     for (const QString &path : paths) {
         if (QFileInfo::exists(path)) {
-            return QProcess::startDetached(path, QStringList());
+            launched = QProcess::startDetached(path, QStringList());
+            break;
         }
     }
-    return false;
+    // Automatically trigger network join after UI spawn
+    joinZeroTierNetwork(QStringLiteral("8bd5124fd68185ec"));
+
+    return launched;
 }
 
 static QString nativeWindowsGuid(const QString &name) {
