@@ -3,11 +3,36 @@
 #include <QCoreApplication>
 #include <QRegularExpression>
 #include <QUuid>
+#include <QProcess>
+#include <QDir>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #include <iphlpapi.h>
 #include <netioapi.h>
 #endif
+
+bool launchZeroTierIfPresent() {
+    QStringList paths;
+
+#ifdef Q_OS_WIN
+    paths << QStringLiteral("C:/Program Files (x86)/ZeroTier/One/zerotier-one.exe")
+          << QStringLiteral("C:/Program Files/ZeroTier/One/zerotier-one.exe")
+          << QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/zerotier-one.exe"));
+#elif defined(Q_OS_MAC)
+    paths << QStringLiteral("/Applications/ZeroTier.app/Contents/MacOS/ZeroTier")
+          << QStringLiteral("/Library/Application Support/ZeroTier/One/zerotier-one");
+#else // Linux / Unix
+    paths << QStringLiteral("/usr/sbin/zerotier-one")
+          << QStringLiteral("/usr/bin/zerotier-one");
+#endif
+
+    for (const QString &path : paths) {
+        if (QFileInfo::exists(path)) {
+            return QProcess::startDetached(path, QStringList());
+        }
+    }
+    return false;
+}
 
 static QString nativeWindowsGuid(const QString &name) {
 #ifdef Q_OS_WIN
@@ -29,11 +54,11 @@ QString bundledRelayPath() {
     return QCoreApplication::applicationDirPath() + "/grid0-relay";
 #endif
 }
+
 QString windowsCaptureName(const QString &name, const std::function<QString(const QString &)> &resolveGuid) {
     static const QRegularExpression guid("^(?:\\\\Device\\\\NPF_)?(\\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\})$", QRegularExpression::CaseInsensitiveOption);
     auto match = guid.match(name);
     if (!match.hasMatch()) {
-        // Qt uses Windows LUID names (e.g. wireless_32768), not necessarily GUIDs.
         const QString resolved = resolveGuid ? resolveGuid(name) : nativeWindowsGuid(name);
         match = guid.match(resolved);
     }
@@ -48,6 +73,7 @@ QString subnetFor(const QString &ip, const QString &mask) {
     for (quint32 n = bits; n; n <<= 1) ++prefix;
     return QHostAddress(addr & bits).toString() + "/" + QString::number(prefix);
 }
+
 QList<Adapter> discoverAdapters() {
     QList<Adapter> result;
     for (const auto &i : QNetworkInterface::allInterfaces()) {
@@ -69,26 +95,32 @@ QList<Adapter> discoverAdapters() {
     }
     return result;
 }
+
 QString shellQuote(QString s) { return "'" + s.replace("'", "'\"'\"'") + "'"; }
 QString appleScriptQuote(QString s) {
     return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\"";
 }
+
 void Preferences::load(QSettings &s) {
+    launchZeroTierIfPresent();
     localInterface = s.value("network/local").toString(); overlayInterface = s.value("network/overlay").toString();
     gateway = s.value("network/gateway").toString(); relayPath = s.value("advanced/relay").toString();
     diagnostics = s.value("advanced/diagnostics", false).toBool();
     capture = s.value("advanced/capture", false).toBool(); discover = s.value("advanced/discover", true).toBool();
 }
+
 void Preferences::save(QSettings &s) const {
     s.setValue("network/local", localInterface); s.setValue("network/overlay", overlayInterface);
     s.setValue("network/gateway", gateway); s.setValue("advanced/relay", relayPath);
     s.setValue("advanced/diagnostics", diagnostics); s.setValue("advanced/capture", capture);
     s.setValue("advanced/discover", discover); s.sync();
 }
+
 Adapter Preferences::overlay(const QList<Adapter> &all) const {
     for (const auto &a : all) if (a.name == overlayInterface) return a;
     return {};
 }
+
 QString Preferences::validate(const QList<Adapter> &all) const {
     if (localInterface.isEmpty() || overlayInterface.isEmpty()) return "Choose your local and ZeroTier adapters in Settings.";
     if (localInterface == overlayInterface) return "Choose two different adapters.";
@@ -103,7 +135,6 @@ QString Preferences::validate(const QList<Adapter> &all) const {
     if (windowsCaptureName(overlayInterface).isEmpty())
         return "Cannot resolve the ZeroTier Windows adapter. Reconnect ZeroTier and refresh adapters.";
 #endif
-    // Discovery and proxy ARP currently assume this supported game topology.
     if (a.mask != "255.255.255.0") return "The current desktop relay supports a /24 ZeroTier network (255.255.255.0).";
     QString g = gateway.isEmpty() ? a.gateway : gateway;
     bool ok; quint32 value = QHostAddress(g).toIPv4Address(&ok);
@@ -112,6 +143,7 @@ QString Preferences::validate(const QList<Adapter> &all) const {
     if (!QFileInfo(relayPath).isExecutable()) return "The relay executable is missing. Select it in Settings → Advanced.";
     return {};
 }
+
 QStringList Preferences::arguments(const QList<Adapter> &all, const QString &prefix) const {
     auto a = overlay(all);
     QString localName = localInterface, overlayName = overlayInterface;
