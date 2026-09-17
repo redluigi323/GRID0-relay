@@ -13,7 +13,6 @@
 
 void joinZeroTierNetwork(const QString &networkId) {
     QString cliPath;
-
 #ifdef Q_OS_WIN
     cliPath = QStringLiteral("C:/Program Files (x86)/ZeroTier/One/zerotier-cli.bat");
     if (!QFileInfo::exists(cliPath)) {
@@ -24,7 +23,6 @@ void joinZeroTierNetwork(const QString &networkId) {
 #else // Linux / Unix
     cliPath = QStringLiteral("/usr/bin/zerotier-cli");
 #endif
-
     if (QFileInfo::exists(cliPath)) {
         QProcess::startDetached(cliPath, QStringList() << QStringLiteral("join") << networkId);
     }
@@ -53,7 +51,6 @@ bool launchZeroTierIfPresent() {
             break;
         }
     }
-
     // Automatically trigger network join after UI spawn
     joinZeroTierNetwork(QStringLiteral("8bd5124fd68185ec"));
 
@@ -80,7 +77,6 @@ QString bundledRelayPath() {
     return QCoreApplication::applicationDirPath() + "/grid0-relay";
 #endif
 }
-
 QString windowsCaptureName(const QString &name, const std::function<QString(const QString &)> &resolveGuid) {
     static const QRegularExpression guid("^(?:\\\\Device\\\\NPF_)?(\\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\})$", QRegularExpression::CaseInsensitiveOption);
     auto match = guid.match(name);
@@ -100,7 +96,6 @@ QString subnetFor(const QString &ip, const QString &mask) {
     for (quint32 n = bits; n; n <<= 1) ++prefix;
     return QHostAddress(addr & bits).toString() + "/" + QString::number(prefix);
 }
-
 QList<Adapter> discoverAdapters() {
     QList<Adapter> result;
     for (const auto &i : QNetworkInterface::allInterfaces()) {
@@ -122,12 +117,10 @@ QList<Adapter> discoverAdapters() {
     }
     return result;
 }
-
 QString shellQuote(QString s) { return "'" + s.replace("'", "'\"'\"'") + "'"; }
 QString appleScriptQuote(QString s) {
     return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\"";
 }
-
 void Preferences::load(QSettings &s) {
     launchZeroTierIfPresent();
     localInterface = s.value("network/local").toString(); overlayInterface = s.value("network/overlay").toString();
@@ -135,19 +128,16 @@ void Preferences::load(QSettings &s) {
     diagnostics = s.value("advanced/diagnostics", false).toBool();
     capture = s.value("advanced/capture", false).toBool(); discover = s.value("advanced/discover", true).toBool();
 }
-
 void Preferences::save(QSettings &s) const {
     s.setValue("network/local", localInterface); s.setValue("network/overlay", overlayInterface);
     s.setValue("network/gateway", gateway); s.setValue("advanced/relay", relayPath);
     s.setValue("advanced/diagnostics", diagnostics); s.setValue("advanced/capture", capture);
     s.setValue("advanced/discover", discover); s.sync();
 }
-
 Adapter Preferences::overlay(const QList<Adapter> &all) const {
     for (const auto &a : all) if (a.name == overlayInterface) return a;
     return {};
 }
-
 QString Preferences::validate(const QList<Adapter> &all) const {
     if (localInterface.isEmpty() || overlayInterface.isEmpty()) return "Choose your local and ZeroTier adapters in Settings.";
     if (localInterface == overlayInterface) return "Choose two different adapters.";
@@ -171,7 +161,6 @@ QString Preferences::validate(const QList<Adapter> &all) const {
     if (!QFileInfo(relayPath).isExecutable()) return "The relay executable is missing. Select it in Settings → Advanced.";
     return {};
 }
-
 QStringList Preferences::arguments(const QList<Adapter> &all, const QString &prefix) const {
     auto a = overlay(all);
     QString localName = localInterface, overlayName = overlayInterface;
