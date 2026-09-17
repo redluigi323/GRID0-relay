@@ -42,6 +42,15 @@ add_subdirectory(lwip)
 add_subdirectory(uv_lwip)
 add_subdirectory(src)
 
+# The AppImage's relay and launcher are run by pkexec from outside the mounted
+# image, where only the host's libraries are visible. Linking the GCC runtimes
+# statically keeps them working on a host whose libstdc++ is older than the
+# build machine's.
+option(ZLL_STATIC_RUNTIME "Link libstdc++/libgcc statically into the relay and launcher" OFF)
+if(ZLL_STATIC_RUNTIME)
+    target_link_options(grid0-relay PRIVATE -static-libstdc++ -static-libgcc)
+endif()
+
 option(ZLL_BUILD_GUI "Build the Qt desktop application" OFF)
 if(ZLL_BUILD_GUI)
     add_subdirectory(desktop)

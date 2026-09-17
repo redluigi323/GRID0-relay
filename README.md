@@ -4,7 +4,7 @@ Fork of Switch-lan-play, meant to be used in conjuction with ZeroTier as a moder
 resulting in much more stability across the board, way faster speeds, and also a way for unmodded switches to play online with either 
 [sys-zerotier](https://github.com/redluigi323/sys-zerotier) users (wonder who made that lol) or emulator users!
 
-Currently has support for Windows pc's and ARM macs.
+Currently has support for Windows pc's, Macs (Apple Silicon and Intel), and Linux as an AppImage.
 
 
 Theres both a cli you can use, and a Native QT gui with either macOS theming or Windows 11 theming.
@@ -13,8 +13,8 @@ Theres both a cli you can use, and a Native QT gui with either macOS theming or 
 simple usage guide:
 
 1. Download the latest release from [releases](https://github.com/redluigi323/GRID0-relay/releases).
-2. Run it by either running GRID0Relay.exe(Windows) or GRID0 Relay.app(macOS) (you will be prompted for admin perms when necessary).
-3. If you dont have Zerotier and Npcap installed, head to settings and press the button to install both and run their setups.
+2. Run it by either running GRID0Relay.exe(Windows), GRID0 Relay.app(macOS), or the AppImage(Linux) (you will be prompted for admin perms when necessary).
+3. If you dont have Zerotier and Npcap installed, the app tells you on startup and offers to install them. On Linux, install ZeroTier and your distro's libpcap package (libpcap0.8 on Debian/Ubuntu, libpcap on Fedora/Arch).
 4. Join a network on ZeroTier's ui.
 5. Setup the adapters (will be automatically chosen if both are detected)
 6. Input the ip settings on your switch

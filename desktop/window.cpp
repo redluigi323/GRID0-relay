@@ -138,8 +138,11 @@ Window::Window(bool preview) : previewMode(preview) {
 #ifdef Q_OS_WIN
     network->addWidget(text("Install Npcap and ZeroTier before starting. This Windows preview uses your existing local network; hotspot setup is manual."));
 #endif
-    requirements = text(""); network->addWidget(requirements);
-    setupRequirements = new QPushButton; network->addWidget(setupRequirements, 0, Qt::AlignLeft);
+    // Replaced by checkDependencies() at startup; this is what previews and
+    // screenshots show, so it must not be an empty button.
+    requirements = text("Checking for ZeroTier and packet capture support…"); network->addWidget(requirements);
+    setupRequirements = new QPushButton("Check required software"); setupRequirements->setEnabled(false);
+    network->addWidget(setupRequirements, 0, Qt::AlignLeft);
     network->addStretch(); settingsTabs->addTab(configuration, "Connection");
 
     auto *advanced = new QWidget; auto *av = new QVBoxLayout(advanced); av->setContentsMargins(18, 20, 18, 12); av->setSpacing(12);
@@ -190,7 +193,9 @@ Window::Window(bool preview) : previewMode(preview) {
         QDir().mkpath(dir); QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
     });
     loading = false; refreshAdapters();
-    if (!previewMode) QTimer::singleShot(0, this, &Window::checkDependencies);
+    // Missing ZeroTier or Npcap is reported once the window is up, not silently
+    // left in Settings: without them Start cannot work at all.
+    if (!previewMode) QTimer::singleShot(0, this, [this] { checkDependencies(); promptForDependencies(); });
 }
 void Window::selectPage(int page, int sub) { tabs->setCurrentIndex(page); settingsTabs->setCurrentIndex(sub); }
 void Window::refreshAdapters() {
@@ -266,8 +271,86 @@ void Window::checkDependencies() {
         requirements->setText("ZeroTier is required. macOS already includes libpcap.");
         setupRequirements->setText("Get ZeroTier for macOS…"); setupRequirements->setEnabled(true);
     }
+#elif defined(Q_OS_LINUX)
+    if (state.zeroTier && state.npcap) {
+        requirements->setText("ZeroTier and libpcap are ready.");
+        setupRequirements->setText("Required software installed"); setupRequirements->setEnabled(false);
+    } else if (!state.zeroTier) {
+        requirements->setText(state.npcap ? "ZeroTier is required." :
+            "ZeroTier is required, and libpcap is missing: install your distribution's package "
+            "(libpcap0.8 on Debian and Ubuntu, libpcap on Fedora and Arch).");
+        setupRequirements->setText("Get ZeroTier for Linux…"); setupRequirements->setEnabled(true);
+    } else {
+        requirements->setText("libpcap is missing. Install your distribution's package "
+            "(libpcap0.8 on Debian and Ubuntu, libpcap on Fedora and Arch), then reopen GRID0 Relay.");
+        setupRequirements->setText("Install libpcap with your package manager"); setupRequirements->setEnabled(false);
+    }
 #else
     requirements->hide(); setupRequirements->hide();
+#endif
+}
+void Window::promptForDependencies() {
+    if (previewMode) return;
+    const DependencyStatus state = dependencies.status();
+#ifdef Q_OS_WIN
+    if (state.winPcap) {
+        QMessageBox box(QMessageBox::Warning, "GRID0 Relay needs Npcap",
+            "WinPcap is installed on this PC. Npcap cannot be installed beside it, and GRID0 Relay "
+            "needs Npcap to see your Switch's traffic.\n\nRemove WinPcap in Apps & Features, then reopen "
+            "GRID0 Relay and it will offer the Npcap installer.", QMessageBox::NoButton, this);
+        auto *open = box.addButton("Open Apps & Features…", QMessageBox::AcceptRole);
+        box.addButton("Not now", QMessageBox::RejectRole);
+        box.setDefaultButton(open);
+        box.exec();
+        if (box.clickedButton() == open) QDesktopServices::openUrl(QUrl("ms-settings:appsfeatures"));
+        return;
+    }
+    if (state.zeroTier && state.npcap) return;
+    QStringList missing;
+    if (!state.zeroTier) missing << "ZeroTier One";
+    if (!state.npcap) missing << "Npcap";
+    const bool several = missing.size() > 1;
+    QMessageBox box(QMessageBox::Warning, "Required software missing",
+        "GRID0 Relay cannot start the relay without " + missing.join(" and ") + ".\n\n"
+        "ZeroTier carries your Switch's LAN traffic to your friends, and Npcap lets the relay read and "
+        "send that traffic on this PC.", QMessageBox::NoButton, this);
+    box.setInformativeText("Installing downloads the official installer" + QString(several ? "s" : "") +
+        ", asks Windows to validate " + (several ? "each signature" : "its signature") +
+        ", and starts the installation. Npcap opens its own screen so you can approve its driver terms. "
+        "Windows will ask for administrator permission.");
+    auto *install = box.addButton("Install now…", QMessageBox::AcceptRole);
+    box.addButton("Not now", QMessageBox::RejectRole);
+    box.setDefaultButton(install);
+    box.exec();
+    if (box.clickedButton() == install) dependencies.installMissing();
+#elif defined(Q_OS_MACOS)
+    if (state.zeroTier) return;
+    QMessageBox box(QMessageBox::Warning, "ZeroTier is required",
+        "GRID0 Relay cannot start the relay without the ZeroTier client.\n\nZeroTier carries your "
+        "Switch's LAN traffic to your friends. macOS already includes libpcap, so nothing else is needed.",
+        QMessageBox::NoButton, this);
+    auto *download = box.addButton("Get ZeroTier…", QMessageBox::AcceptRole);
+    box.addButton("Not now", QMessageBox::RejectRole);
+    box.setDefaultButton(download);
+    box.exec();
+    if (box.clickedButton() == download) QDesktopServices::openUrl(QUrl("https://www.zerotier.com/download/"));
+#elif defined(Q_OS_LINUX)
+    if (state.zeroTier && state.npcap) return;
+    QStringList missing;
+    if (!state.zeroTier) missing << "the ZeroTier client";
+    if (!state.npcap) missing << "libpcap";
+    QMessageBox box(QMessageBox::Warning, "Required software missing",
+        "GRID0 Relay cannot start the relay without " + missing.join(" and ") + ".\n\n"
+        "ZeroTier carries your Switch's LAN traffic to your friends, and libpcap lets the relay read and "
+        "send that traffic on this computer.", QMessageBox::NoButton, this);
+    if (!state.npcap)
+        box.setInformativeText("libpcap comes from your distribution: install libpcap0.8 on Debian and "
+            "Ubuntu, or libpcap on Fedora and Arch, then reopen GRID0 Relay.");
+    QPushButton *download = state.zeroTier ? nullptr : box.addButton("Get ZeroTier…", QMessageBox::AcceptRole);
+    auto *dismiss = box.addButton(download ? "Not now" : "OK", QMessageBox::RejectRole);
+    box.setDefaultButton(download ? download : dismiss);
+    box.exec();
+    if (download && box.clickedButton() == download) QDesktopServices::openUrl(QUrl("https://www.zerotier.com/download/"));
 #endif
 }
 void Window::setupDependencies() {
@@ -290,6 +373,9 @@ void Window::setupDependencies() {
     if (QMessageBox::question(this, "Install required software", prompt) == QMessageBox::Yes) dependencies.installMissing();
 #elif defined(Q_OS_MACOS)
     if (!state.zeroTier && QMessageBox::question(this, "Get ZeroTier", "macOS already includes libpcap. Open ZeroTier’s official macOS download page?") == QMessageBox::Yes)
+        QDesktopServices::openUrl(QUrl("https://www.zerotier.com/download/"));
+#elif defined(Q_OS_LINUX)
+    if (!state.zeroTier && QMessageBox::question(this, "Get ZeroTier", "libpcap comes from your distribution. Open ZeroTier’s official download page?") == QMessageBox::Yes)
         QDesktopServices::openUrl(QUrl("https://www.zerotier.com/download/"));
 #endif
 }

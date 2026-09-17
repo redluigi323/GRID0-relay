@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
@@ -11,9 +12,51 @@
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #endif
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
 #include <sys/socket.h>
 #include <unistd.h>
+
+// The kernel identifies the helper that connects back, not anything it sends.
+// glibc has no getpeereid, so Linux reads the peer's credentials instead.
+static bool rootPeer(qintptr descriptor) {
+#ifdef Q_OS_LINUX
+    struct ucred credentials;
+    socklen_t length = sizeof(credentials);
+    if (getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &credentials, &length)) return false;
+    return credentials.uid == 0;
+#else
+    uid_t uid; gid_t group;
+    return getpeereid(descriptor, &uid, &group) == 0 && uid == 0;
+#endif
+}
+#endif
+
+#ifdef Q_OS_LINUX
+// An AppImage is a FUSE mount owned by the user who started it: root cannot
+// read anything inside it, so pkexec could not run the helper or the relay
+// from there. Copy both into the app's private data directory, which is
+// 0700 and therefore still only reachable by this user and by root.
+static bool copyForRoot(const QString &source, QString *target, QString *error) {
+    const QString directory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/helpers";
+    if (!QDir().mkpath(directory)) {
+        *error = "Cannot prepare a private folder for the administrator prompt."; return false;
+    }
+    QFile::setPermissions(directory, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    const QFileInfo original(source);
+    const QString destination = directory + "/" + original.fileName();
+    const QFileInfo existing(destination);
+    if (!existing.exists() || existing.size() != original.size() ||
+        existing.lastModified() < original.lastModified()) {
+        QFile::remove(destination);
+        if (!QFile::copy(source, destination)) {
+            *error = "Cannot copy " + original.fileName() + " out of the AppImage for the administrator prompt.";
+            return false;
+        }
+    }
+    QFile::setPermissions(destination, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    *target = destination;
+    return true;
+}
 #endif
 
 RelayController::RelayController(QObject *parent) : QObject(parent) {
@@ -23,9 +66,8 @@ RelayController::RelayController(QObject *parent) : QObject(parent) {
     });
     connect(&server, &QLocalServer::newConnection, this, [this] {
         auto *incoming = server.nextPendingConnection();
-#ifdef Q_OS_MACOS
-        uid_t uid; gid_t gid;
-        if (getpeereid(incoming->socketDescriptor(), &uid, &gid) || uid != 0 || socket || current == Stopping) {
+#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
+        if (!rootPeer(incoming->socketDescriptor()) || socket || current == Stopping) {
             incoming->abort(); incoming->deleteLater(); return;
         }
 #endif
@@ -70,13 +112,23 @@ void RelayController::start(const Preferences &p, const QList<Adapter> &adapters
     lastError.clear();
     auto error = p.validate(adapters);
     if (!error.isEmpty()) { emit message(error); return; }
-#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
-    emit message("The Linux launcher is not implemented yet.");
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN) && !defined(Q_OS_LINUX)
+    emit message("This platform has no relay launcher yet.");
     return;
 #else
-#ifdef Q_OS_MACOS
-    const QString helper = QCoreApplication::applicationDirPath() + "/grid0-relay-supervisor";
-    if (!QFileInfo(helper).isExecutable()) { emit message("The bundled macOS launcher is missing. Rebuild the desktop app."); return; }
+#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
+    QString helper = QCoreApplication::applicationDirPath() + "/grid0-relay-supervisor";
+    QString relay = p.relayPath;
+    if (!QFileInfo(helper).isExecutable()) { emit message("The bundled launcher is missing. Rebuild the desktop app."); return; }
+#endif
+#ifdef Q_OS_LINUX
+    // Running from an AppImage puts both binaries somewhere root cannot read.
+    if (qEnvironmentVariableIsSet("APPIMAGE")) {
+        QString error;
+        if (!copyForRoot(helper, &helper, &error) || !copyForRoot(p.relayPath, &relay, &error)) {
+            emit message(error); return;
+        }
+    }
 #endif
     const QString id = QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss") + "-" + QUuid::createUuid().toString(QUuid::Id128).left(8);
     report = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/reports/" + id;
@@ -109,12 +161,29 @@ void RelayController::start(const Preferences &p, const QList<Adapter> &adapters
     if (!socketDirectory->isValid() || !server.listen(socketDirectory->path() + "/control")) {
         log.close(); emit message("Cannot create the local relay control connection."); return;
     }
-    QStringList command{helper, server.fullServerName(), QString::number(getuid()), p.relayPath};
+    QStringList command{helper, server.fullServerName(), QString::number(getuid()), relay};
     command += p.arguments(adapters, report + "/packets");
-    for (auto &part : command) part = shellQuote(part);
     pending.clear(); ready = false;
+#ifdef Q_OS_LINUX
+    // Keep the command a user can run themselves if there is no polkit agent.
+    QStringList manual{relay};
+    manual += p.arguments(adapters, report + "/packets");
+    for (auto &part : manual) part = shellQuote(part);
+    manualCommand = "sudo " + manual.join(' ');
+    const QString pkexec = QStandardPaths::findExecutable("pkexec");
+    if (pkexec.isEmpty()) {
+        log.close(); server.close(); socketDirectory.reset();
+        emit message("pkexec was not found, so the app cannot ask for administrator access. "
+                     "Start the relay in a terminal with: " + manualCommand);
+        return;
+    }
+    setState(Authorizing); emit message("Approve the administrator prompt to start.");
+    authorization.start(pkexec, command);
+#else
+    for (auto &part : command) part = shellQuote(part);
     setState(Authorizing); emit message("Approve the macOS administrator prompt to start.");
     authorization.start("/usr/bin/osascript", {"-e", "with timeout of 604800 seconds\n do shell script " + appleScriptQuote(command.join(' ')) + " with administrator privileges\nend timeout"});
+#endif
 #endif
 #endif
 }
@@ -165,8 +234,17 @@ void RelayController::finish(int code, QProcess::ExitStatus status) {
     if (log.isOpen()) log.close();
     setState(Idle);
     if (requested) emit message("Relay stopped.");
-    else if (!ready || code || status == QProcess::CrashExit)
+    else if (!ready || code || status == QProcess::CrashExit) {
+#ifdef Q_OS_LINUX
+        // pkexec: 126 is a refused or dismissed prompt, 127 is no agent to ask.
+        if (!ready && code == 126) emit message("Administrator authorization was cancelled.");
+        else if (!ready && code == 127)
+            emit message("Could not ask for administrator access on this desktop. "
+                         "Start the relay in a terminal with: " + manualCommand);
+        else
+#endif
         emit message(error.contains("-128") ? "Administrator authorization was cancelled." :
                      (error.isEmpty() ? "The relay exited. Open Advanced to inspect the log." : error));
+    }
     else emit message("Relay stopped.");
 }

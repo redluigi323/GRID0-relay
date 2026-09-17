@@ -1,7 +1,32 @@
-FROM buildpack-deps:bionic
+# Build environment for the Linux x86_64 AppImage, used directly on a Linux
+# host and through scripts/build-linux.py from a Mac. Ubuntu 24.04 sets the
+# oldest glibc the AppImage will run against.
+FROM ubuntu:24.04
 
-RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        binutils \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        desktop-file-utils \
+        file \
+        libgl1-mesa-dev \
+        libpcap-dev \
+        ninja-build \
+        pkg-config \
+        python3 \
+        qt6-base-dev \
+        qt6-base-dev-tools \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt update
-RUN apt install -y cmake make git
-RUN apt install -y libpcap0.8-dev
+# Pinned like every other build tool in this repository. appimagetool is only
+# used to pack the finished AppDir; it never ends up in the release.
+RUN curl -fsSL -o /opt/appimagetool \
+        https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage \
+    && echo "46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d06083d1  /opt/appimagetool" | sha256sum -c - \
+    && chmod 0755 /opt/appimagetool
+
+# No FUSE inside a container, so appimagetool unpacks itself instead.
+ENV APPIMAGETOOL=/opt/appimagetool APPIMAGE_EXTRACT_AND_RUN=1

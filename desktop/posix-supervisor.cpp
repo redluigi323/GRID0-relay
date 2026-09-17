@@ -1,5 +1,6 @@
 // One authorized launch, one child. No daemon, password handling or shell commands.
 // The GUI owns the control socket. Disconnecting stops and reaps our own child.
+// Shared by macOS (authorized through osascript) and Linux (through pkexec).
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -17,6 +18,23 @@
 
 static volatile sig_atomic_t interrupted = 0;
 static void stop(int) { interrupted = 1; }
+
+// glibc has no getpeereid; Linux reports the peer's credentials through
+// SO_PEERCRED instead. Either way the GUI is identified by the kernel, not by
+// anything it sends us.
+static int peer_uid(int fd, uid_t *uid)
+{
+#ifdef __linux__
+    struct ucred credentials;
+    socklen_t length = sizeof(credentials);
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials, &length)) return -1;
+    *uid = credentials.uid;
+    return 0;
+#else
+    gid_t group;
+    return getpeereid(fd, uid, &group);
+#endif
+}
 int main(int argc, char **argv) {
     if (argc < 5) { fprintf(stderr, "Usage: supervisor socket-path gui-uid relay [args]\n"); return 2; }
     char *end = nullptr; auto uid = strtoul(argv[2], &end, 10);
@@ -28,8 +46,8 @@ int main(int argc, char **argv) {
     if (connection < 0 || connect(connection, reinterpret_cast<sockaddr *>(&address), sizeof(address))) {
         perror("Cannot connect to desktop app"); return 2;
     }
-    uid_t peer; gid_t group;
-    if (getpeereid(connection, &peer, &group) || peer != uid) return 2;
+    uid_t peer;
+    if (peer_uid(connection, &peer) || peer != uid) return 2;
     fcntl(connection, F_SETFD, FD_CLOEXEC);
     int logs[2]; if (pipe(logs)) return 2;
     pid_t child = fork();

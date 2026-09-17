@@ -1,4 +1,4 @@
-"""macOS launcher lifecycle regression. Uses only local IPC and unprivileged children."""
+"""macOS and Linux launcher lifecycle regression. Uses only local IPC and unprivileged children."""
 import os
 import pathlib
 import socket

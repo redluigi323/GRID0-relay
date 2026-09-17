@@ -4,9 +4,12 @@ This is mostly here for people who want to build it themselves instead of
 waiting for a release. You will need a compiler, CMake, and the right Qt
 install for your platform.
 
-## macOS (ARM)
+## macOS
 
-This is the easiest one to build right now.
+This is the easiest one to build right now. The same steps work on Apple
+Silicon and on Intel Macs; each one produces an app for the Mac you built it
+on. Homebrew's Qt is built for a single architecture, so there is no universal
+app: an Intel Mac needs a build made on an Intel Mac.
 
 1. Install Xcode command line tools, Homebrew, CMake, and Qt:
 
@@ -43,6 +46,10 @@ This is the easiest one to build right now.
 
 The packaged app bundles Qt. Users still need the ZeroTier app installed on
 their Mac. macOS already includes libpcap, so Npcap is not needed here.
+
+Releases carry both Macs: the workflow builds the Apple Silicon app on
+`macos-latest` and the Intel app on `macos-13`, and attaches them as
+`GRID0-Relay-macOS-arm64.zip` and `GRID0-Relay-macOS-x64.zip`.
 
 ## Windows
 
@@ -124,6 +131,56 @@ user install those later.
 Your packaged Windows release will be in `dist/`. It includes `GRID0Relay.exe`,
 the CLI relay, Qt runtime files, licenses, and the buildable source.
 
+## Linux
+
+The Linux build produces an AppImage containing the app, the relay, its
+launcher and Qt. libpcap and ZeroTier come from the player's own system, the
+same way the Mac build expects the ZeroTier app to be installed.
+
+### Building on Linux
+
+On Debian or Ubuntu, install the build tools and Qt:
+
+```bash
+sudo apt install build-essential cmake ninja-build python3 qt6-base-dev \
+    qt6-base-dev-tools libgl1-mesa-dev libpcap-dev desktop-file-utils binutils
+```
+
+Then clone with submodules and build:
+
+```bash
+git clone --recurse-submodules https://github.com/redluigi323/GRID0-relay.git
+cd GRID0-relay
+python3 scripts/build-linux.py --native
+```
+
+Your AppImage will be at `dist/linux-x64/GRID0-Relay-x86_64.AppImage`. Mark it
+executable and run it; the app asks for the relay's capture privileges through
+`pkexec` when you press Start. Without a polkit agent it tells you the `sudo`
+command to run instead.
+
+The script downloads `appimagetool` once, pinned by checksum, and puts it in
+the build directory. Pass `--appimagetool` if you already have one. Packaging
+never writes over an existing output folder, so delete `dist/linux-x64/` or
+pass a new `--output` when you build again.
+
+Whichever distribution you build on sets the oldest glibc the AppImage runs
+against, so build on the oldest one you want to support. The release workflow
+uses Ubuntu 24.04.
+
+### Building Linux from a Mac
+
+There is no macOS to Linux cross compiler here. The script builds inside a
+Linux container instead, which needs Docker Desktop (or Podman) running:
+
+```bash
+python3 scripts/build-linux.py
+```
+
+That builds the image in `docker/Dockerfile.linux`, runs the same native build
+inside it, and leaves the AppImage in `dist/linux-x64/`. On Apple Silicon the
+container is emulated, so expect it to take several minutes.
+
 ## CLI only
 
 If you only want the relay and do not want the GUI, Qt is not required:
@@ -144,9 +201,16 @@ ctest --test-dir build/desktop --output-on-failure
 python3 tests/run_native_tests.py
 ```
 
+On Linux, also check the launcher and its helper:
+
+```bash
+python3 tests/test_desktop_supervisor.py build-linux/desktop/grid0-relay-supervisor
+```
+
 GitHub Actions runs the same native tests on Linux and macOS for every push,
-and builds and tests the packaged Windows launcher on a Windows runner.
+builds and tests the packaged Windows launcher on a Windows runner, and builds
+the AppImage and confirms it starts.
 
 Do not commit `build/`, `dist/`, downloaded SDKs, packet captures, or logs.
-They are ignored already. Put the finished macOS and Windows ZIPs on a GitHub
-Release instead.
+They are ignored already. Put the finished macOS ZIPs, Windows ZIP and Linux
+AppImage on a GitHub Release instead.

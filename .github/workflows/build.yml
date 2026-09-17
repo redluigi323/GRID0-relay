@@ -36,6 +36,30 @@ jobs:
         with:
           name: grid0-relay-${{ runner.os }}-cli
           path: build/src/grid0-relay
+  linux-desktop:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Desktop dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev ninja-build desktop-file-utils
+      - name: Build the app, relay and AppImage
+        run: python3 scripts/build-linux.py --native --build build-linux --output dist/linux-x64
+      - name: Desktop, supervisor and relay tests
+        run: |
+          ctest --test-dir build-linux/desktop --output-on-failure
+          python3 tests/test_desktop_supervisor.py build-linux/desktop/grid0-relay-supervisor
+          python3 tests/run_native_tests.py build-linux
+      - name: Check the AppImage starts
+        run: |
+          export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen
+          ./dist/linux-x64/GRID0-Relay-x86_64.AppImage --preview --screenshot /tmp/appimage.png
+          test -s /tmp/appimage.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GRID0-Relay-Linux-x86_64-AppImage
+          path: dist/linux-x64/GRID0-Relay-x86_64.AppImage
   windows:
     runs-on: windows-latest
     steps:

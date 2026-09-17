@@ -53,7 +53,13 @@ int grid0RelayMain(int argc, char **argv) {
     app.setWindowIcon(QIcon(icon));
 #endif
     int iconOutput = args.indexOf("--write-icon");
-    if (iconOutput >= 0 && iconOutput + 1 < args.size()) return icon.save(args[iconOutput + 1]) ? 0 : 1;
+    if (iconOutput >= 0 && iconOutput + 1 < args.size()) {
+        // An optional square size lets Linux packaging produce its 256px icon
+        // without depending on an image tool being installed.
+        const int size = iconOutput + 2 < args.size() ? args[iconOutput + 2].toInt() : 0;
+        if (size > 0) icon = icon.scaled(size, size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        return icon.save(args[iconOutput + 1]) ? 0 : 1;
+    }
     const QString data = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     QDir().mkpath(data);
     QLockFile lock(data + "/desktop.lock");

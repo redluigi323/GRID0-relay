@@ -28,9 +28,13 @@ Verbose diagnostics and packet capture default off. Every launch records a text 
 
 The visible log retains 2,000 lines; the on-disk text log is capped around 16 MiB. Packet captures are not size-limited, so enable them for a reproduction session rather than leaving them on indefinitely. Reports contain local/overlay IPs and may contain game payloads.
 
-## macOS launch boundary
+## macOS and Linux launch boundary
 
-The app runs as the logged-in user. A quoted `osascript` command requests authorization for the bundled `grid0-relay-supervisor`, which connects to the app's private Unix socket and starts one relay child with explicit arguments. Only the authorized root peer is accepted by the app. The supervisor verifies the GUI peer's UID, forwards child output, and accepts only a stop message. It executes no commands from that connection and never handles a password.
+The app runs as the logged-in user. A quoted `osascript` command on macOS, or `pkexec` on Linux, requests authorization for the bundled `grid0-relay-supervisor`, which connects to the app's private Unix socket and starts one relay child with explicit arguments. Only the authorized root peer is accepted by the app: macOS reads it with `getpeereid`, Linux with `SO_PEERCRED`. The supervisor verifies the GUI peer's UID, forwards child output, and accepts only a stop message. It executes no commands from that connection and never handles a password. Linux passes the arguments to `pkexec` directly rather than through a shell.
+
+Where there is no polkit agent to ask, Start reports that and prints the equivalent `sudo` command instead of failing silently.
+
+Running from an AppImage adds one step. Its contents live on a FUSE mount that only the user who started it can read, so root could not execute the launcher or relay from there. The app copies both into its own private data directory, mode 0700, and runs those copies. Root therefore executes a binary from a user-owned path: acceptable for this development authorization design on a single-user machine, and the reason a system install is preferable for shared machines. The relay and launcher link libstdc++ and libgcc statically for this reason, so neither needs anything from inside the AppImage once `pkexec` has cleared the environment.
 
 The supervisor owns the child PID and waits for it. Stop, socket disconnection, or termination signals request SIGINT; a child that fails to exit is killed after five seconds and reaped. There is no installed privileged daemon, global firewall change, or detached relay left deliberately running after app closure. The relay's existing singleton guard also rejects legacy/background duplicates.
 
@@ -56,6 +60,8 @@ python3 tests/run_native_tests.py
 
 The tests cover settings persistence, subnet derivation, invalid/missing adapters, gateway validation, shell/AppleScript quoting, relay forwarding, and actual supervisor child cleanup on Stop/disconnection. The supervisor tests use unprivileged mock children and local IPC. They do not automatically approve or exercise the macOS password dialog.
 
+On Linux the same checks apply, using `build-linux/desktop` as the build directory. `tests.cpp` also covers the launcher's behaviour with no polkit agent present.
+
 Window-only UI previews do not start a relay or save preferences:
 
 ```sh
@@ -65,6 +71,6 @@ build/desktop/Grid0Relay.app/Contents/MacOS/Grid0Relay --preview --settings --ad
 
 ## Platform boundary
 
-The Qt views, settings, validation and adapter discovery use portable APIs. macOS uses the privileged supervisor described above. Windows has a MinGW x64 build, Npcap runtime loading, friendly adapter selection and event-based Start/Stop; this preview elevates the app at launch. The Windows style is Qt Widgets' `windows11` plugin. See [Windows setup, cross-compilation and packaging](../docs/windows.md).
+The Qt views, settings, validation and adapter discovery use portable APIs. macOS and Linux use the privileged supervisor described above. Windows has a MinGW x64 build, Npcap runtime loading, friendly adapter selection and event-based Start/Stop; this preview elevates the app at launch. The Windows style is Qt Widgets' `windows11` plugin. See [Windows setup, cross-compilation and packaging](../docs/windows.md).
 
-Windows binaries and mock tests have been cross-compiled, but Windows execution and gameplay still require a Windows machine or CI runner. The Linux GUI launcher remains unsupported; the CLI retains its existing platform support. Cross-platform source still requires a compiler and Qt SDK for each target.
+Windows binaries and mock tests have been cross-compiled, but Windows execution and gameplay still require a Windows machine or CI runner. The Linux app ships as an AppImage carrying Qt; it expects the host's libpcap and ZeroTier, and its relay path has not been tested against a console yet. Cross-platform source still requires a compiler and Qt SDK for each target.

@@ -23,6 +23,7 @@ private:
     void updateState();
     void exportReport();
     void checkDependencies();
+    void promptForDependencies();
     void setupDependencies();
     Preferences preferences;
     QList<Adapter> adapters;

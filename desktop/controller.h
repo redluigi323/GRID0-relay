@@ -35,6 +35,9 @@ private:
     QFile log;
     QString report;
     QString lastError;
+#ifdef Q_OS_LINUX
+    QString manualCommand;
+#endif
     QByteArray pending;
     QTimer startupTimeout;
     bool ready = false;

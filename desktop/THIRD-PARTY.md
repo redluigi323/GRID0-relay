@@ -8,4 +8,6 @@ The Windows package dynamically links Qt 6.11.2 (Qt Core, Gui, Network, Widgets 
 
 MinGW GCC runtime DLLs (libgcc and libstdc++) use GPLv3 with the GCC Runtime Library Exception. See `licenses/GCC-GPL3.txt` and `licenses/GCC-RUNTIME.txt`. Compiler version is recorded in build-info.json. GCC sources: https://gcc.gnu.org/releases.html. MinGW-w64 and winpthreads notices are in `licenses/mingw-w64.txt` and `licenses/winpthreads.txt`; sources: https://www.mingw-w64.org/.
 
+The Linux AppImage dynamically links Qt 6 (Qt Core, DBus, Gui, Network, Widgets, XcbQpa and platform plugins) from the distribution it was built on, together with the X11, xcb, font and image libraries those need. Qt is available under LGPLv3/GPLv3 and commercial terms; this package uses the distribution's open-source build, and `build-info.json` beside the AppImage lists every bundled library. libpcap and ZeroTier One are not bundled: both come from the player's own system.
+
 Npcap SDK declarations are used to build the runtime loader, but the Npcap driver, wpcap.dll and Packet.dll are not redistributed. Install Npcap separately from https://npcap.com. ZeroTier One is also a separate install from https://www.zerotier.com/download/.

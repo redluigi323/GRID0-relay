@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrl>
@@ -109,6 +110,33 @@ DependencyStatus DependencyInstaller::status() const {
             break;
         }
     }
+    // ZeroTier's adapter only exists while it is running, so an installed but
+    // stopped client must not be reported as missing.
+    for (const QString &path : {QStringLiteral("/Library/Application Support/ZeroTier/One"),
+                                QStringLiteral("/usr/local/bin/zerotier-cli"),
+                                QStringLiteral("/Applications/ZeroTier.app"),
+                                QStringLiteral("/Applications/ZeroTier One.app")}) {
+        if (result.zeroTier) break;
+        result.zeroTier = QFileInfo::exists(path);
+    }
+#elif defined(Q_OS_LINUX)
+    // libpcap comes from the distribution (and travels inside the AppImage),
+    // so ZeroTier is the only thing a player still has to install.
+    // The AppImage carries Qt, not libpcap: capture belongs to the host's own
+    // library, exactly as ZeroTier belongs to the host's own daemon.
+    for (const QString &directory : {QStringLiteral("/lib/x86_64-linux-gnu"), QStringLiteral("/usr/lib/x86_64-linux-gnu"),
+                                     QStringLiteral("/usr/lib64"), QStringLiteral("/usr/lib")}) {
+        if (result.npcap) break;
+        for (const QString &name : QDir(directory).entryList({"libpcap.so*"}, QDir::Files | QDir::System))
+            if (name.startsWith("libpcap.so")) { result.npcap = true; break; }
+    }
+    for (const auto &adapter : QNetworkInterface::allInterfaces()) {
+        if (adapter.name().startsWith("zt")) { result.zeroTier = true; break; }
+    }
+    if (!result.zeroTier)
+        result.zeroTier = QFileInfo::exists("/var/lib/zerotier-one") ||
+                          QFileInfo::exists("/usr/sbin/zerotier-one") ||
+                          !QStandardPaths::findExecutable("zerotier-cli").isEmpty();
 #else
     result.zeroTier = true;
     result.npcap = true;

@@ -1,16 +1,55 @@
 #include "lan-play.h"
 
-#ifdef __APPLE__
-#include <libproc.h>
+#if defined(__APPLE__) || defined(__linux__)
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <limits.h>
+#ifdef __APPLE__
+#include <libproc.h>
+#else
+#include <dirent.h>
+#endif
+
+#ifdef __linux__
+/* Same intent as the macOS scan below: report a relay that an earlier launch
+ * left running, rather than fighting it over the same adapters. */
+static int report_running_relay(void)
+{
+    DIR *proc = opendir("/proc");
+    if (!proc) return 0; /* Without /proc the lifetime lock still protects us. */
+    struct dirent *entry;
+    int found = 0;
+    while (!found && (entry = readdir(proc))) {
+        char *end = NULL;
+        long pid = strtol(entry->d_name, &end, 10);
+        if (!end || *end || pid <= 0 || pid == (long)getpid()) continue;
+        char path[64], name[256];
+        snprintf(path, sizeof(path), "/proc/%ld/comm", pid);
+        FILE *comm = fopen(path, "r");
+        if (!comm) continue;
+        if (fgets(name, sizeof(name), comm)) {
+            name[strcspn(name, "\n")] = '\0';
+            if (!strcmp(name, "grid0-relay")) {
+                eprintf("Another GRID0 Relay is already running (PID %ld).\n"
+                        "Stop that relay before starting this one; two instances can interfere.\n", pid);
+                found = 1;
+            }
+        }
+        fclose(comm);
+    }
+    closedir(proc);
+    return found ? -1 : 0;
+}
+#endif
 
 /* Old GUI launches detached their privileged relay. Catch those legacy
  * processes as well as new instances protected by the lifetime lock below. */
 static int acquire_relay_instance(void)
 {
+#ifdef __linux__
+    if (report_running_relay() != 0) return -1;
+#else
     int count = proc_listallpids(NULL, 0);
     if (count <= 0 || count > (INT_MAX / (int)sizeof(pid_t)) - 256) {
         eprintf("Cannot inspect running relays; refusing an unchecked duplicate start.\n");
@@ -38,6 +77,7 @@ static int acquire_relay_instance(void)
         }
     }
     free(pids);
+#endif
 
     /* Do not unlink this file on exit: its inode is the shared lock. The OS
      * releases flock on process exit, including a crash or forced stop. */
@@ -415,7 +455,7 @@ int old_main()
         return 2;
     }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__linux__)
     if (acquire_relay_instance() != 0) return 2;
 #elif defined(_WIN32)
     instance_mutex = CreateMutexW(NULL, FALSE, L"Local\\Grid0Relay.NativeRelay");

@@ -1,4 +1,4 @@
-find_package(Qt6 6.7 REQUIRED COMPONENTS Widgets Network Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Network Test)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
@@ -15,18 +15,26 @@ set_target_properties(Grid0Relay PROPERTIES
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
 add_dependencies(Grid0Relay grid0-relay)
+if(UNIX)
+    # macOS and Linux both start the relay through this helper: one authorized
+    # launch, one child, owned by the GUI's private socket.
+    add_executable(zll-supervisor posix-supervisor.cpp)
+    target_compile_features(zll-supervisor PRIVATE cxx_std_17)
+    set_target_properties(zll-supervisor PROPERTIES OUTPUT_NAME grid0-relay-supervisor AUTOMOC OFF)
+    if(ZLL_STATIC_RUNTIME)
+        target_link_options(zll-supervisor PRIVATE -static-libstdc++ -static-libgcc)
+    endif()
+    add_dependencies(Grid0Relay zll-supervisor)
+    add_custom_command(TARGET Grid0Relay POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:grid0-relay>" "$<TARGET_FILE_DIR:Grid0Relay>/grid0-relay"
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:zll-supervisor>" "$<TARGET_FILE_DIR:Grid0Relay>/grid0-relay-supervisor")
+endif()
 if(APPLE)
     # Native macOS 26 glass for a few contained surfaces. The library is a
     # no-op away from Cocoa; Windows and Linux retain their native Qt styling.
     add_subdirectory(${PROJECT_SOURCE_DIR}/external/qt-liquid-glass qt-liquid-glass)
     target_link_libraries(Grid0Relay PRIVATE QtLiquidGlass)
-    add_executable(zll-supervisor macos-supervisor.cpp)
-    target_compile_features(zll-supervisor PRIVATE cxx_std_17)
-    set_target_properties(zll-supervisor PROPERTIES OUTPUT_NAME grid0-relay-supervisor AUTOMOC OFF)
-    add_dependencies(Grid0Relay zll-supervisor)
     add_custom_command(TARGET Grid0Relay POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:grid0-relay>" "$<TARGET_FILE_DIR:Grid0Relay>/grid0-relay"
-        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:zll-supervisor>" "$<TARGET_FILE_DIR:Grid0Relay>/grid0-relay-supervisor"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:Grid0Relay>/Contents/Resources"
         COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/LICENSE.txt" "$<TARGET_BUNDLE_DIR:Grid0Relay>/Contents/Resources/LICENSE.txt")
 endif()
