@@ -4,6 +4,7 @@ on:
   push:
     tags:
     - 'v*'
+  workflow_dispatch:
 
 jobs:
   release:
@@ -30,7 +31,7 @@ jobs:
             sdk_name: -sdk-24.10.0-x86-64_
 
     env:
-      PACKAGE_NAME: switch-lan-play
+      PACKAGE_NAME: grid0-relay
       SDK_URL_PATH: ${{ matrix.sdk_url_path }}
       SDK_NAME: ${{ matrix.sdk_name }}
       ARCH: ${{ matrix.arch }}
@@ -39,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -69,7 +70,7 @@ jobs:
           ./scripts/feeds install libpcap > /dev/null 2>&1
           mkdir package/${PACKAGE_NAME}
           cp -f ${{ github.workspace }}/docker/Makefile.openwrt package/${PACKAGE_NAME}/Makefile
-          ln -s ${{ github.workspace }} package/${PACKAGE_NAME}/switch-lan-play
+          ln -s ${{ github.workspace }} package/${PACKAGE_NAME}/${PACKAGE_NAME}
           make defconfig > /dev/null 2>&1
           make package/${PACKAGE_NAME}/compile V=s > /dev/null
           IPK_PATH=$(find "$SDK_HOME/bin" -type f -name "${PACKAGE_NAME}_*.ipk")

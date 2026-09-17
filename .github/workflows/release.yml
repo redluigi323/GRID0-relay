@@ -1,98 +1,103 @@
 name: Release
-
 on:
   push:
     tags:
-    - 'v*'
-
+      - 'v*'
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  build-linux:
+  linux-cli:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-    - name: install dependencies
-      run: sudo apt install -y libpcap-dev
-    - name: make
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release ..
-        make
-    - name: upload built files
-      uses: actions/upload-artifact@v4
-      with:
-        name: lan-play-linux
-        path: build/src/lan-play
-  build-windows:
-    runs-on: windows-latest
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-    - name: Setup MSBuild.exe
-      uses: microsoft/setup-msbuild@v1.1
-    - name: make
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release ..
-        MSBuild SwitchLanPlay.sln /t:Build /p:Configuration=Release
-
-    - name: upload built files
-      uses: actions/upload-artifact@v4
-      with:
-        name: lan-play-windows
-        path: build/src/Release/lan-play.exe
-  build-macos:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+      - name: Build the CLI relay
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build build --parallel 4
+          ./build/src/grid0-relay --version
+      - name: Relay forwarding and host-socket tests
+        run: python3 tests/run_native_tests.py
+      - name: Name the CLI for its platform
+        run: cp build/src/grid0-relay grid0-relay-linux-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grid0-relay-linux-x64
+          path: grid0-relay-linux-x64
+  macos-app:
     runs-on: macos-latest
-
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-    - name: make
-      run: |
-        mkdir build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release ..
-        make
-
-    - name: upload built files
-      uses: actions/upload-artifact@v4
-      with:
-        name: lan-play-macos
-        path: build/src/lan-play
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Qt and build tools
+        run: brew install cmake qtbase
+      - name: Build the app and relay
+        run: |
+          cmake -S . -B build -DZLL_BUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"
+          cmake --build build --parallel 4
+      - name: Desktop, supervisor and relay tests
+        run: |
+          ctest --test-dir build/desktop --output-on-failure
+          python3 tests/test_desktop_supervisor.py build/desktop/grid0-relay-supervisor
+          python3 tests/run_native_tests.py
+      - name: Package the app bundle
+        run: python3 desktop/package-macos.py --build build --output dist/macos --macdeployqt "$(brew --prefix qtbase)/bin/macdeployqt"
+      - name: Name the archive for its platform
+        run: cp "dist/macos/GRID0-Relay-macOS.zip" GRID0-Relay-macOS-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GRID0-Relay-macOS-arm64
+          path: GRID0-Relay-macOS-arm64.zip
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
+      - name: Select native MinGW tools
+        shell: pwsh
+        run: '"C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append'
+      - name: Fetch pinned SDKs
+        run: python scripts/fetch-windows-deps.py --with-qt
+      - name: Build and package
+        run: python scripts/build-windows.py --compiler g++ --output dist/windows-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GRID0-Relay-Windows-x64
+          path: dist/windows-x64/GRID0-Relay-Windows-x64.zip
   release:
     runs-on: ubuntu-latest
-    needs: [build-linux, build-windows, build-macos]
-
+    needs: [linux-cli, macos-app, windows-package]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
-################################################################################
-    - uses: actions/download-artifact@v4
-      with:
-        name: lan-play-linux
-        path: lan-play-linux
-    - uses: actions/download-artifact@v4
-      with:
-        name: lan-play-windows
-        path: lan-play-windows
-    - uses: actions/download-artifact@v4
-      with:
-        name: lan-play-macos
-        path: lan-play-macos
-################################################################################
-    - name: rename
-      run: |
-        mv ./lan-play-windows/lan-play.exe ./lan-play-windows/lan-play-win64.exe
-        mv ./lan-play-linux/lan-play ./lan-play-linux/lan-play-linux
-        mv ./lan-play-macos/lan-play ./lan-play-macos/lan-play-macos
-    - name: Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: "**/lan-play-*"
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List release files
+        run: ls -R artifacts
+      # Published as a draft: these builds are unsigned, so review before release.
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/GRID0-Relay-Windows-x64.zip
+            artifacts/GRID0-Relay-macOS-arm64.zip
+            artifacts/grid0-relay-linux-x64
