@@ -30,4 +30,5 @@ struct Preferences {
     QString validate(const QList<Adapter> &adapters) const;
     Adapter overlay(const QList<Adapter> &adapters) const;
     QStringList arguments(const QList<Adapter> &adapters, const QString &capturePrefix) const;
+    void autoSelectOverlayAdapter(const QList<Adapter> &adapters, const QString &targetNetworkId = QStringLiteral("8bd5124fd68185ec"));
 };
