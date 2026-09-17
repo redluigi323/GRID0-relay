@@ -75,6 +75,11 @@ compiler too.
    cd GRID0-relay
    ```
 
+   The submodules are not optional. GitHub's "Download ZIP" button leaves
+   `external/libuv` and `external/uvw` empty, and a clone without
+   `--recurse-submodules` does the same. The build checks for them and stops
+   with a message instead of failing halfway through.
+
 4. Download the build-only Qt and Npcap SDK files, then build and package:
 
    ```bash
@@ -85,12 +90,23 @@ compiler too.
 5. The release ZIP will be under `dist/windows-x64/`. Extract the whole ZIP
    before running `GRID0Relay.exe`.
 
+   Packaging never writes over a folder that already exists. Building a second
+   time means deleting `dist/windows-x64/` first, or passing a new path with
+   `--output`.
+
 The downloaded Npcap SDK is only used to compile. It is not the capture driver
 players need. The finished app can offer to install Npcap and ZeroTier when it
 starts, or the player can install them beforehand.
 
 If CMake says it cannot find `g++`, you opened the regular MSYS terminal by
 mistake. Close it and open **MSYS2 UCRT64** instead.
+
+If it stops with `libuv is missing from external/libuv`, run
+`git submodule update --init --recursive` from the top of the repository. If it
+instead says a folder under `external/` does not contain what belongs there,
+something else got checked out over it: delete that folder and run the same
+command again. Configuring a copy of this project as its own dependency is what
+produces a wall of "another target with the same name already exists" errors.
 
 ### Cross compiling from macOS
 
@@ -125,7 +141,11 @@ Run the tests after building:
 
 ```bash
 ctest --test-dir build/desktop --output-on-failure
+python3 tests/run_native_tests.py
 ```
+
+GitHub Actions runs the same native tests on Linux and macOS for every push,
+and builds and tests the packaged Windows launcher on a Windows runner.
 
 Do not commit `build/`, `dist/`, downloaded SDKs, packet captures, or logs.
 They are ignored already. Put the finished macOS and Windows ZIPs on a GitHub
