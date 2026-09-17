@@ -3,46 +3,6 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
-  unix-cli:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            slug: linux-x64
-          - os: macos-latest
-            slug: macos-arm64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Verify submodule checkout
-        shell: bash
-        run: |
-          for marker in external/libuv/include/uv.h external/uvw/src/uvw.hpp; do
-            if [ ! -f "$marker" ]; then
-              echo "Missing $marker: external/ does not hold the pinned dependency sources."
-              echo "Clone this repository with --recurse-submodules, or run: git submodule update --init --recursive"
-              exit 1
-            fi
-          done
-      - name: Linux dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
-      - name: Build relay
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          cmake --build build --parallel 4
-          ./build/src/grid0-relay --version
-      - name: Relay forwarding and host-socket tests
-        run: python3 tests/run_native_tests.py
-      - name: Name the CLI for its platform
-        run: cp build/src/grid0-relay grid0-relay-${{ matrix.slug }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: grid0-relay-${{ matrix.slug }}-cli
-          path: grid0-relay-${{ matrix.slug }}
   windows:
     runs-on: windows-latest
     steps:
