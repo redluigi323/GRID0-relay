@@ -11,7 +11,6 @@ struct Adapter {
     QString name, label, ip, mask, subnet, gateway;
     bool overlay = false, wifi = false, up = false;
 };
-
 QList<Adapter> discoverAdapters();
 QString bundledRelayPath();
 QString windowsCaptureName(const QString &name, const std::function<QString(const QString &)> &resolveGuid = {});
