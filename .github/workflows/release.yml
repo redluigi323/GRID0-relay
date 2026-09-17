@@ -35,7 +35,9 @@ jobs:
         include:
           - runner: macos-latest
             arch: arm64
-          - runner: macos-13
+          # GitHub retired macos-13 in December 2025; this is the current
+          # Intel image. Apple silicon builds use macos-latest.
+          - runner: macos-15-intel
             arch: x64
     runs-on: ${{ matrix.runner }}
     steps:
@@ -53,7 +55,13 @@ jobs:
         run: |
           ctest --test-dir build/desktop --output-on-failure
           python3 tests/test_desktop_supervisor.py build/desktop/grid0-relay-supervisor
-          python3 tests/run_native_tests.py
+          python3 tests/run_native_tests.py build
+      - name: Check the app starts and renders
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          build/desktop/Grid0Relay.app/Contents/MacOS/Grid0Relay --preview --screenshot /tmp/play.png
+          test -s /tmp/play.png
       - name: Package the app bundle
         run: python3 desktop/package-macos.py --build build --output dist/macos --macdeployqt "$(brew --prefix qtbase)/bin/macdeployqt"
       - name: Name the archive for its architecture

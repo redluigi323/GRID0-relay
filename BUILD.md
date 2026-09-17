@@ -47,9 +47,11 @@ app: an Intel Mac needs a build made on an Intel Mac.
 The packaged app bundles Qt. Users still need the ZeroTier app installed on
 their Mac. macOS already includes libpcap, so Npcap is not needed here.
 
-Releases carry both Macs: the workflow builds the Apple Silicon app on
-`macos-latest` and the Intel app on `macos-13`, and attaches them as
-`GRID0-Relay-macOS-arm64.zip` and `GRID0-Relay-macOS-x64.zip`.
+Both Macs are built in CI: the Apple Silicon app on `macos-latest` and the
+Intel app on `macos-15-intel`, on every push and again for a release, where
+they are attached as `GRID0-Relay-macOS-arm64.zip` and
+`GRID0-Relay-macOS-x64.zip`. GitHub retired the older `macos-13` Intel image in
+December 2025, so that label no longer works.
 
 ## Windows
 
@@ -207,9 +209,10 @@ On Linux, also check the launcher and its helper:
 python3 tests/test_desktop_supervisor.py build-linux/desktop/grid0-relay-supervisor
 ```
 
-GitHub Actions runs the same native tests on Linux and macOS for every push,
-builds and tests the packaged Windows launcher on a Windows runner, and builds
-the AppImage and confirms it starts.
+GitHub Actions runs these same tests for every push: the CLI on Linux and
+macOS, the app on both Macs, and the Linux app with its AppImage. It also
+builds and tests the packaged Windows launcher on a Windows runner. Each build
+uploads its app, AppImage or ZIP as a run artifact.
 
 Do not commit `build/`, `dist/`, downloaded SDKs, packet captures, or logs.
 They are ignored already. Put the finished macOS ZIPs, Windows ZIP and Linux

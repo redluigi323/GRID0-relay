@@ -5,8 +5,13 @@ permissions:
 jobs:
   unix-cli:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            slug: linux-x64
+          - os: macos-latest
+            slug: macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -32,10 +37,12 @@ jobs:
           ./build/src/grid0-relay --version
       - name: Relay forwarding and host-socket tests
         run: python3 tests/run_native_tests.py
+      - name: Name the CLI for its platform
+        run: cp build/src/grid0-relay grid0-relay-${{ matrix.slug }}
       - uses: actions/upload-artifact@v4
         with:
-          name: grid0-relay-${{ runner.os }}-cli
-          path: build/src/grid0-relay
+          name: grid0-relay-${{ matrix.slug }}-cli
+          path: grid0-relay-${{ matrix.slug }}
   linux-desktop:
     runs-on: ubuntu-24.04
     steps:
@@ -60,6 +67,54 @@ jobs:
         with:
           name: GRID0-Relay-Linux-x86_64-AppImage
           path: dist/linux-x64/GRID0-Relay-x86_64.AppImage
+  macos-desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          # GitHub retired macos-13 in December 2025; this is the current
+          # Intel image. Apple silicon builds use macos-latest.
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Qt and build tools
+        run: brew install cmake qtbase
+      - name: Build the app, relay and launcher
+        run: |
+          cmake -S . -B build -DZLL_BUILD_GUI=ON -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"
+          cmake --build build --parallel 4
+      - name: Desktop, supervisor and relay tests
+        run: |
+          ctest --test-dir build/desktop --output-on-failure
+          python3 tests/test_desktop_supervisor.py build/desktop/grid0-relay-supervisor
+          python3 tests/run_native_tests.py build
+      - name: Check the app starts and renders
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          build/desktop/Grid0Relay.app/Contents/MacOS/Grid0Relay --preview --screenshot /tmp/play.png
+          test -s /tmp/play.png
+      - name: Package the app bundle
+        run: python3 desktop/package-macos.py --build build --output dist/macos --macdeployqt "$(brew --prefix qtbase)/bin/macdeployqt"
+      - name: Check the packaged bundle
+        run: |
+          codesign --verify --deep --strict "dist/macos/GRID0 Relay.app"
+          test -x "dist/macos/GRID0 Relay.app/Contents/MacOS/grid0-relay"
+          test -x "dist/macos/GRID0 Relay.app/Contents/MacOS/grid0-relay-supervisor"
+          test -s dist/macos/GRID0-Relay-macOS.zip
+      - name: Name the archive for its architecture
+        run: cp dist/macos/GRID0-Relay-macOS.zip GRID0-Relay-macOS-${{ matrix.arch }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GRID0-Relay-macOS-${{ matrix.arch }}
+          path: GRID0-Relay-macOS-${{ matrix.arch }}.zip
   windows:
     runs-on: windows-latest
     steps:
@@ -129,3 +184,40 @@ jobs:
         with:
           name: GRID0-Relay-Windows-x64
           path: dist/windows-x64/GRID0-Relay-Windows-x64.zip
+  nightly:
+    # Every green build of main replaces the rolling "nightly" prerelease, so
+    # testers always have current builds without waiting for a version tag.
+    # A failed job skips this job, so a broken build is never published.
+    needs: [unix-cli, linux-desktop, macos-desktop, windows]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish the rolling nightly prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -lh artifacts
+          cat > notes.md <<'EOF'
+          Automatic build of the latest `main`, replaced on every green build.
+
+          These are unsigned development builds. Windows and macOS will warn on first run, and nothing
+          here has been through a release test. For a stable build, use a versioned release instead.
+
+          - `GRID0-Relay-Windows-x64.zip` - extract the whole folder, then run `GRID0Relay.exe`
+          - `GRID0-Relay-macOS-arm64.zip` - Apple Silicon Macs
+          - `GRID0-Relay-macOS-x64.zip` - Intel Macs
+          - `GRID0-Relay-x86_64.AppImage` - Linux; needs ZeroTier and your distribution's libpcap
+          - `grid0-relay-linux-x64`, `grid0-relay-macos-arm64` - command line relay only
+          EOF
+          printf '\nBuilt from %s by run %s.\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" >> notes.md
+          # Replacing the release moves the tag onto the commit just built.
+          gh release delete nightly --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create nightly artifacts/* --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --notes-file notes.md \
+            --title "Nightly build (${GITHUB_SHA:0:7})"

@@ -13,6 +13,8 @@ Theres both a cli you can use, and a Native QT gui with either macOS theming or 
 simple usage guide:
 
 1. Download the latest release from [releases](https://github.com/redluigi323/GRID0-relay/releases).
+   Want the newest code instead? The **Nightly build** prerelease on that same page is rebuilt
+   automatically every time main changes, for Windows, both kinds of Mac, and Linux.
 2. Run it by either running GRID0Relay.exe(Windows), GRID0 Relay.app(macOS), or the AppImage(Linux) (you will be prompted for admin perms when necessary).
 3. If you dont have Zerotier and Npcap installed, the app tells you on startup and offers to install them. On Linux, install ZeroTier and your distro's libpcap package (libpcap0.8 on Debian/Ubuntu, libpcap on Fedora/Arch).
 4. Join a network on ZeroTier's ui.
