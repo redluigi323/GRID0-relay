@@ -3,11 +3,37 @@
 #include <QCoreApplication>
 #include <QRegularExpression>
 #include <QUuid>
+#include <QProcess>
+#include <QDir>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #include <iphlpapi.h>
 #include <netioapi.h>
 #endif
+
+bool launchZeroTierIfPresent() {
+    QStringList paths;
+
+#ifdef Q_OS_WIN
+    paths << QStringLiteral("C:/Program Files (x86)/ZeroTier/One/zerotier_desktop_ui.exe")
+          << QStringLiteral("C:/Program Files/ZeroTier/One/zerotier_desktop_ui.exe")
+          << QStringLiteral("C:/Program Files (x86)/ZeroTier/One/ZeroTier One.exe")
+          << QStringLiteral("C:/Program Files/ZeroTier/One/ZeroTier One.exe")
+          << QDir::cleanPath(QCoreApplication::applicationDirPath() + QStringLiteral("/zerotier_desktop_ui.exe"));
+#elif defined(Q_OS_MAC)
+    paths << QStringLiteral("/Applications/ZeroTier.app/Contents/MacOS/ZeroTier");
+#else // Linux / Unix
+    paths << QStringLiteral("/usr/bin/zerotier-gui")
+          << QStringLiteral("/usr/sbin/zerotier-one");
+#endif
+
+    for (const QString &path : paths) {
+        if (QFileInfo::exists(path)) {
+            return QProcess::startDetached(path, QStringList());
+        }
+    }
+    return false;
+}
 
 static QString nativeWindowsGuid(const QString &name) {
 #ifdef Q_OS_WIN
@@ -74,6 +100,7 @@ QString appleScriptQuote(QString s) {
     return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\"";
 }
 void Preferences::load(QSettings &s) {
+    launchZeroTierIfPresent();
     localInterface = s.value("network/local").toString(); overlayInterface = s.value("network/overlay").toString();
     gateway = s.value("network/gateway").toString(); relayPath = s.value("advanced/relay").toString();
     diagnostics = s.value("advanced/diagnostics", false).toBool();

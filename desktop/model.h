@@ -1,6 +1,10 @@
 #pragma once
 #include <QNetworkInterface>
 #include <QSettings>
+#include <QProcess>
+#include <QFileInfo>
+#include <QDir>
+#include <QCoreApplication>
 #include <functional>
 
 struct Adapter {
@@ -13,6 +17,9 @@ QString windowsCaptureName(const QString &name, const std::function<QString(cons
 QString subnetFor(const QString &ip, const QString &mask);
 QString shellQuote(QString value);
 QString appleScriptQuote(QString value);
+
+// Auto-launches ZeroTier UI/tray application if detected
+bool launchZeroTierIfPresent();
 
 struct Preferences {
     QString localInterface, overlayInterface, gateway, relayPath;
