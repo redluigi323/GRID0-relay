@@ -1,4 +1,7 @@
 # GRID0 Relay
+![License](https://img.shields.io/badge/License-GPLv2-blue.svg)
+[![Chat on Discord](https://img.shields.io/badge/Discord-5865f2?logo=discord&logoColor=white)](https://discordapp.com/invite/splatfest)
+=====
 
 Fork of Switch-lan-play, meant to be used in conjuction with ZeroTier as a modern replacement to the old lan play relay servers
 resulting in much more stability across the board, way faster speeds, and also a way for unmodded switches to play online with either 
