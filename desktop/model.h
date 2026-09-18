@@ -21,6 +21,7 @@ QString appleScriptQuote(QString value);
 // Auto-launches ZeroTier UI/tray application if detected
 bool launchZeroTierIfPresent();
 void joinZeroTierNetwork(const QString &networkId = QStringLiteral("8bd5124fd68185ec"));
+QStringList getZeroTierNetworkIPs(const QString &networkId = QStringLiteral("8bd5124fd68185ec"));
 
 struct Preferences {
     QString localInterface, overlayInterface, gateway, relayPath;
@@ -30,4 +31,6 @@ struct Preferences {
     QString validate(const QList<Adapter> &adapters) const;
     Adapter overlay(const QList<Adapter> &adapters) const;
     QStringList arguments(const QList<Adapter> &adapters, const QString &capturePrefix) const;
+    void autoSelectOverlayAdapter(const QList<Adapter> &adapters, const QString &targetNetworkId = QStringLiteral("8bd5124fd68185ec"));
+    QList<Adapter> refreshAdapters(const QString &targetNetworkId = QStringLiteral("8bd5124fd68185ec"));
 };

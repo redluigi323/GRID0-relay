@@ -5,6 +5,9 @@
 #include <QUuid>
 #include <QProcess>
 #include <QDir>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #include <iphlpapi.h>
@@ -26,6 +29,44 @@ void joinZeroTierNetwork(const QString &networkId) {
     if (QFileInfo::exists(cliPath)) {
         QProcess::startDetached(cliPath, QStringList() << QStringLiteral("join") << networkId);
     }
+}
+
+QStringList getZeroTierNetworkIPs(const QString &networkId) {
+    QString cliPath;
+
+#ifdef Q_OS_WIN
+    cliPath = QStringLiteral("C:/Program Files (x86)/ZeroTier/One/zerotier-cli.bat");
+    if (!QFileInfo::exists(cliPath)) {
+        cliPath = QStringLiteral("C:/Program Files/ZeroTier/One/zerotier-cli.bat");
+    }
+#elif defined(Q_OS_MAC)
+    cliPath = QStringLiteral("/Library/Application Support/ZeroTier/One/zerotier-cli");
+#else
+    cliPath = QStringLiteral("/usr/bin/zerotier-cli");
+#endif
+    if (!QFileInfo::exists(cliPath)) return {};
+    QProcess proc;
+    proc.start(cliPath, QStringList() << QStringLiteral("-j") << QStringLiteral("listnetworks"));
+    if (!proc.waitForFinished(2000)) return {};
+    QByteArray output = proc.readAllStandardOutput();
+    QJsonDocument doc = QJsonDocument::fromJson(output);
+    if (!doc.isArray()) return {};
+    QStringList resultIPs;
+    QJsonArray networks = doc.array();
+    for (const QJsonValue &val : networks) {
+        QJsonObject net = val.toObject();
+        if (net.value(QStringLiteral("id")).toString().toLower() == networkId.toLower()) {
+            QJsonArray assignedAddresses = net.value(QStringLiteral("assignedAddresses")).toArray();
+            for (const QJsonValue &addrVal : assignedAddresses) {
+                QString cidr = addrVal.toString();
+                QString ip = cidr.split(QLatin1Char('/')).first();
+                if (!ip.isEmpty()) {
+                    resultIPs.append(ip);
+                }
+            }
+        }
+    }
+    return resultIPs;
 }
 
 bool launchZeroTierIfPresent() {
@@ -121,12 +162,30 @@ QString shellQuote(QString s) { return "'" + s.replace("'", "'\"'\"'") + "'"; }
 QString appleScriptQuote(QString s) {
     return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r") + "\"";
 }
+void Preferences::autoSelectOverlayAdapter(const QList<Adapter> &adapters, const QString &targetNetworkId) {
+    QStringList targetIPs = getZeroTierNetworkIPs(targetNetworkId);
+    if (!targetIPs.isEmpty()) {
+        for (const auto &a : adapters) {
+            if (targetIPs.contains(a.ip)) {
+                overlayInterface = a.name;
+                return;
+            }
+        }
+    }
+    for (const auto &a : adapters) {
+        if (a.overlay) {
+            overlayInterface = a.name;
+            return;
+        }
+    }
+}
 void Preferences::load(QSettings &s) {
     launchZeroTierIfPresent();
     localInterface = s.value("network/local").toString(); overlayInterface = s.value("network/overlay").toString();
     gateway = s.value("network/gateway").toString(); relayPath = s.value("advanced/relay").toString();
     diagnostics = s.value("advanced/diagnostics", false).toBool();
     capture = s.value("advanced/capture", false).toBool(); discover = s.value("advanced/discover", true).toBool();
+    autoSelectOverlayAdapter(discoverAdapters());
 }
 void Preferences::save(QSettings &s) const {
     s.setValue("network/local", localInterface); s.setValue("network/overlay", overlayInterface);
@@ -173,4 +232,9 @@ QStringList Preferences::arguments(const QList<Adapter> &all, const QString &pre
     if (!discover) args << "--no-discover-switch";
     if (capture) args << "--capture-prefix" << prefix;
     return args;
+}
+QList<Adapter> Preferences::refreshAdapters(const QString &targetNetworkId) {
+    QList<Adapter> adapters = discoverAdapters();
+    autoSelectOverlayAdapter(adapters, targetNetworkId);
+    return adapters;
 }

@@ -7,6 +7,18 @@
 #include <QTemporaryDir>
 #include <QTimer>
 
+class Controller : public QObject {
+    Q_OBJECT
+public:
+    explicit Controller(Preferences *prefs, QObject *parent = nullptr);
+    ~Controller() override = default;
+public slots:
+    void handleRefreshAdapters();
+signals:
+    void adaptersRefreshed(const QList<Adapter> &adapters);
+private:
+    Preferences *m_prefs = nullptr;
+};
 class RelayController : public QObject {
     Q_OBJECT
 public:
