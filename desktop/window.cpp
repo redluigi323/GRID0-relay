@@ -201,7 +201,7 @@ void Window::selectPage(int page, int sub) { tabs->setCurrentIndex(page); settin
 void Window::refreshAdapters() {
     if (relay.busy()) return;
     loading = true;
-    adapters = discoverAdapters();
+    adapters = preferences.refreshAdapters();
     for (const auto &a : adapters) {
         if (preferences.localInterface.isEmpty() && a.up && !a.overlay && (a.wifi || a.name == "en0")) preferences.localInterface = a.name;
         if (preferences.overlayInterface.isEmpty() && a.up && a.overlay) preferences.overlayInterface = a.name;
