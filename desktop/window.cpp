@@ -15,6 +15,7 @@
 #include <QMessageBox>
 #include <QMenuBar>
 #include <QPixmap>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QStyle>
 #include <QTimer>
@@ -101,7 +102,8 @@ Window::Window(bool preview) : previewMode(preview) {
         form->addWidget(label, row, 0); form->addWidget(pair.second, row++, 1);
     }
     auto *copy = new QPushButton("Copy Switch settings");
-    auto *copyRow = new QHBoxLayout; copyRow->addWidget(copy); copyRow->addStretch();
+    scanArp = new QPushButton("Scan ARP Table");
+    auto *copyRow = new QHBoxLayout; copyRow->addWidget(copy); copyRow->addWidget(scanArp); copyRow->addStretch();
     form->addLayout(copyRow, 3, 0, 1, 2); playLayout->addWidget(group);
 #ifdef Q_OS_MACOS
     // A QFrame gives the native effect an independent host. QGroupBox uses a
@@ -112,6 +114,7 @@ Window::Window(bool preview) : previewMode(preview) {
     connect(copy, &QPushButton::clicked, this, [this] {
         QApplication::clipboard()->setText("IP address: " + address->text() + "\nSubnet mask: " + mask->text() + "\nGateway: " + gatewayValue->text());
     });
+    connect(scanArp, &QPushButton::clicked, this, &Window::scanArpTable);
     playLayout->addWidget(text("Use the exact subnet mask shown here. After changing network settings, reconnect your Switch and restart the game before entering LAN mode."));
     validation = text(""); playLayout->addWidget(validation);
     auto *configure = new QPushButton("Connection settings…"); playLayout->addWidget(configure, 0, Qt::AlignLeft);
@@ -397,4 +400,35 @@ void Window::closeEvent(QCloseEvent *event) {
     if (relay.busy()) {
         closing = true; status->setText("Stopping the relay before closing…"); relay.stop(); event->ignore();
     } else event->accept();
+}
+
+void Window::scanArpTable() {
+    log->appendPlainText("\n--- ARP Table Scan (" + QDateTime::currentDateTime().toString("hh:mm:ss") + ") ---");
+    
+    QProcess process;
+    process.start("arp", QStringList() << "-a");
+
+    if (!process.waitForFinished(3000)) {
+        log->appendPlainText("Error: ARP scan timed out or failed to execute.");
+        return;
+    }
+
+    QString output = QString::fromLocal8Bit(process.readAllStandardOutput());
+    if (output.isEmpty()) {
+        output = QString::fromLocal8Bit(process.readAllStandardError());
+    }
+
+    if (output.trimmed().isEmpty()) {
+        log->appendPlainText("No ARP entries found.");
+    } else {
+        log->appendPlainText(output.trimmed());
+    }
+    
+    log->appendPlainText("----------------------------------------\n");
+
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("ARP Table Scan");
+    msgBox.setText("Current Local ARP Table Entries:");
+    msgBox.setDetailedText(output);
+    msgBox.exec();
 }
