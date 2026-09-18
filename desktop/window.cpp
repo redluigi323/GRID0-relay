@@ -2,6 +2,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDirIterator>
@@ -15,6 +16,7 @@
 #include <QMessageBox>
 #include <QMenuBar>
 #include <QPixmap>
+#include <QProcess>
 #include <QStandardPaths>
 #include <QStyle>
 #include <QTimer>
@@ -163,7 +165,11 @@ Window::Window(bool preview) : previewMode(preview) {
     connect(setupRequirements, &QPushButton::clicked, this, &Window::setupDependencies);
     connect(&dependencies, &DependencyInstaller::progress, requirements, &QLabel::setText);
     connect(&dependencies, &DependencyInstaller::completed, this, [this](const QString &message) {
-        checkDependencies(); QMessageBox::information(this, "Setup complete", message);
+        checkDependencies();
+        QMessageBox::information(this, "Setup complete", message + "\n\nClick OK to restart the application.");
+
+        QProcess::startDetached(QCoreApplication::applicationFilePath(), QCoreApplication::arguments());
+        QCoreApplication::quit();
     });
     connect(&dependencies, &DependencyInstaller::failed, this, [this](const QString &message) {
         checkDependencies(); QMessageBox::warning(this, "Setup needs attention", message);
