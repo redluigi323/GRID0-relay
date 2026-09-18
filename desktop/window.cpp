@@ -430,10 +430,12 @@ void Window::scanArpTable() {
         return;
     }
 
-    // Regular expression matching IP and MAC addresses in standard OS ARP output formats
+    // Regex matching IP and MAC address pairs
     static const QRegularExpression arpRegex(R"(((?:\d{1,3}\.){3}\d{1,3})\s+([0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}))");
 
     QStringList parsedLines;
+    QString detectedIp;
+    QString detectedMac;
     int nintendoCount = 0;
 
     const QStringList lines = output.split(QRegularExpression("[\r\n]+"));
@@ -445,6 +447,8 @@ void Window::scanArpTable() {
 
             if (isNintendoMac(mac)) {
                 nintendoCount++;
+                detectedIp = ip;
+                detectedMac = mac;
                 parsedLines << QString("%1  %2  <-- [Nintendo Hardware]").arg(ip, -16).arg(mac);
             } else if (mac.startsWith("ee:", Qt::CaseInsensitive) || mac.startsWith("ee-", Qt::CaseInsensitive)) {
                 parsedLines << QString("%1  %2  <-- [LAN Play Virtual Peer]").arg(ip, -16).arg(mac);
@@ -460,13 +464,30 @@ void Window::scanArpTable() {
     log->appendPlainText(formattedOutput);
     log->appendPlainText("----------------------------------------\n");
 
+    // AUTO-START LOGIC: Exactly 1 Switch found
+    if (nintendoCount == 1) {
+        switchStatus->setText(QString("Auto-detected Switch: %1 (%2)").arg(detectedIp, detectedMac));
+        log->appendPlainText(QString("[AUTO-CONNECT] Found exactly 1 Switch at %1 (%2). Starting relay...").arg(detectedIp, detectedMac));
+
+        // Save detected Switch target if your Preferences struct holds it
+        // preferences.targetSwitchIp = detectedIp; 
+        // preferences.targetSwitchMac = detectedMac;
+
+        refreshAdapters(); 
+        if (preferences.validate(adapters).isEmpty() && !relay.busy()) {
+            relay.start(preferences, adapters);
+        }
+        return;
+    }
+
+    // Fallback dialog if 0 or multiple devices are found
     QMessageBox msgBox(this);
     msgBox.setWindowTitle("ARP Table Scan");
     
-    if (nintendoCount > 0) {
-        msgBox.setText(QString("Found %1 Nintendo device(s) in local ARP table!").arg(nintendoCount));
+    if (nintendoCount > 1) {
+        msgBox.setText(QString("Found %1 Nintendo devices. Please specify which one to connect.").arg(nintendoCount));
     } else {
-        msgBox.setText("Current Local ARP Table Entries:");
+        msgBox.setText("No physical Nintendo devices detected in ARP table.");
     }
     
     msgBox.setDetailedText(formattedOutput);
