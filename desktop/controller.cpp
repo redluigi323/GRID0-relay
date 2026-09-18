@@ -9,9 +9,12 @@
 #include <QStandardPaths>
 #include <QSysInfo>
 #include <QUuid>
+#include <QDebug>
+
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #endif
+
 #if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
 #include <sys/socket.h>
 #include <unistd.h>
@@ -58,6 +61,21 @@ static bool copyForRoot(const QString &source, QString *target, QString *error) 
     return true;
 }
 #endif
+
+Controller::Controller(Preferences *prefs, QObject *parent)
+    : QObject(parent)
+    , m_prefs(prefs)
+{
+}
+
+void Controller::handleRefreshAdapters()
+{
+    qDebug() << "Refreshing network adapters...";
+    if (m_prefs) {
+        QList<Adapter> updatedAdapters = m_prefs->refreshAdapters();
+        emit adaptersRefreshed(updatedAdapters);
+    }
+}
 
 RelayController::RelayController(QObject *parent) : QObject(parent) {
     connect(&authorization, &QProcess::finished, this, &RelayController::finish);
