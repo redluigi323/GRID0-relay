@@ -233,3 +233,8 @@ QStringList Preferences::arguments(const QList<Adapter> &all, const QString &pre
     if (capture) args << "--capture-prefix" << prefix;
     return args;
 }
+QList<Adapter> Preferences::refreshAdapters(const QString &targetNetworkId) {
+    QList<Adapter> adapters = discoverAdapters();
+    autoSelectOverlayAdapter(adapters, targetNetworkId);
+    return adapters;
+}
