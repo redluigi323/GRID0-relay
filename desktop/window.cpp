@@ -196,6 +196,12 @@ Window::Window(bool preview) : previewMode(preview) {
     connect(&relay, &RelayController::lineReceived, log, &QPlainTextEdit::appendPlainText);
     connect(&relay, &RelayController::message, status, &QLabel::setText);
     connect(&relay, &RelayController::switchDetected, this, [this](const QString &s) { switchStatus->setText("Local console detected: " + s); });
+    connect(&relay, &RelayController::relayEvent, this, [this](const QString &event, const QString &detail) {
+        if (event == "SWITCH_CONNECTED" && !detail.isEmpty())
+            switchStatus->setText("Local console detected: " + detail);
+        else if (event == "ERROR_PCAP")
+            switchStatus->setText("Packet capture unavailable");
+    });
     connect(&relay, &RelayController::stateChanged, this, [this] { updateState(); if (closing && !relay.busy()) close(); });
     connect(exportButton, &QPushButton::clicked, this, &Window::exportReport);
     connect(openFolder, &QPushButton::clicked, this, [] {

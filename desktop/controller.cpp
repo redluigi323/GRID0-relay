@@ -212,6 +212,19 @@ void RelayController::receive(QByteArray bytes) {
         auto pos = pending.indexOf('\n');
         QString line = QString::fromUtf8(pending.left(pos)).trimmed(); pending.remove(0, pos + 1);
         emit lineReceived(line);
+        static const QRegularExpression eventPattern(
+            QStringLiteral("^(SWITCH_CONNECTED|TUNNEL_READY|ERROR_PCAP)(?:\\s+(.*))?$"));
+        const auto eventMatch = eventPattern.match(line);
+        if (eventMatch.hasMatch()) {
+            const QString event = eventMatch.captured(1);
+            const QString detail = eventMatch.captured(2).trimmed();
+            emit relayEvent(event, detail);
+            if (event == "TUNNEL_READY") emit message("ZeroTier tunnel ready; searching for your Switch…");
+            else if (event == "ERROR_PCAP") {
+                lastError = detail.isEmpty() ? line : detail;
+                emit message("Packet capture error: " + lastError);
+            }
+        }
         if (line.startsWith("Relay started (PID ") && current != Stopping) {
             ready = true; startupTimeout.stop(); setState(Running); emit message("Relay running. Open Splatoon’s LAN mode.");
         }
