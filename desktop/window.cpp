@@ -1,3 +1,4 @@
+#include "oui_constants.h"
 #include "window.h"
 #include <QApplication>
 #include <QClipboard>
@@ -27,6 +28,12 @@
 #include <QtLiquidGlass/QtLiquidGlass.h>
 #endif
 
+static bool isNintendoMac(const QString &rawMac) {
+    QString cleanMac = rawMac.trimmed().toUpper().replace("-", ":");
+    if (cleanMac.length() < 8) return false;
+    QString prefix = cleanMac.left(8);
+    return GRID0::NINTENDO_OUI_PREFIXES.contains(prefix);
+}
 static QLabel *text(const QString &s, QWidget *parent = nullptr) {
     auto *l = new QLabel(s, parent); l->setWordWrap(true); l->setTextFormat(Qt::PlainText); return l;
 }
@@ -420,15 +427,48 @@ void Window::scanArpTable() {
 
     if (output.trimmed().isEmpty()) {
         log->appendPlainText("No ARP entries found.");
-    } else {
-        log->appendPlainText(output.trimmed());
+        return;
     }
-    
+
+    // Regular expression matching IP and MAC addresses in standard OS ARP output formats
+    static const QRegularExpression arpRegex(R"(((?:\d{1,3}\.){3}\d{1,3})\s+([0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}[:-][0-9a-fA-F]{2}))");
+
+    QStringList parsedLines;
+    int nintendoCount = 0;
+
+    const QStringList lines = output.split(QRegularExpression("[\r\n]+"));
+    for (const QString &line : lines) {
+        QRegularExpressionMatch match = arpRegex.match(line);
+        if (match.hasMatch()) {
+            QString ip = match.captured(1);
+            QString mac = match.captured(2);
+
+            if (isNintendoMac(mac)) {
+                nintendoCount++;
+                parsedLines << QString("%1  %2  <-- [Nintendo Hardware]").arg(ip, -16).arg(mac);
+            } else if (mac.startsWith("ee:", Qt::CaseInsensitive) || mac.startsWith("ee-", Qt::CaseInsensitive)) {
+                parsedLines << QString("%1  %2  <-- [LAN Play Virtual Peer]").arg(ip, -16).arg(mac);
+            } else {
+                parsedLines << QString("%1  %2").arg(ip, -16).arg(mac);
+            }
+        } else if (!line.trimmed().isEmpty()) {
+            parsedLines << line;
+        }
+    }
+
+    QString formattedOutput = parsedLines.join("\n");
+    log->appendPlainText(formattedOutput);
     log->appendPlainText("----------------------------------------\n");
 
     QMessageBox msgBox(this);
     msgBox.setWindowTitle("ARP Table Scan");
-    msgBox.setText("Current Local ARP Table Entries:");
-    msgBox.setDetailedText(output);
+    
+    if (nintendoCount > 0) {
+        msgBox.setText(QString("Found %1 Nintendo device(s) in local ARP table!").arg(nintendoCount));
+    } else {
+        msgBox.setText("Current Local ARP Table Entries:");
+    }
+    
+    msgBox.setDetailedText(formattedOutput);
     msgBox.exec();
 }
