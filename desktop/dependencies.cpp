@@ -202,7 +202,7 @@ bool DependencyInstaller::downloadAndVerify(Package package, QString *file, QStr
 
 void DependencyInstaller::installNext() {
     if (pending.isEmpty()) {
-        emit completed("Required software is installed. Reopen Grid0 Relay so Windows can finish creating network adapters.");
+        emit completed("Required software is installed.");
         return;
     }
     const Package package = pending.takeFirst();
