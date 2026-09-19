@@ -93,7 +93,7 @@ bool launchZeroTierIfPresent() {
         }
     }
     // Automatically trigger network join after UI spawn
-    joinZeroTierNetwork(QStringLiteral("8bd5124fd68185ec"));
+    joinZeroTierNetwork(QStringLiteral("83048a063269be83"));
 
     return launched;
 }
