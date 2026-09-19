@@ -213,10 +213,7 @@ QString Preferences::validate(const QList<Adapter> &all) const {
 #endif
     // Discovery and proxy ARP currently assume this supported game topology.
     if (a.mask != "255.255.255.0") return "The current desktop relay supports a /24 ZeroTier network (255.255.255.0).";
-    // An explicitly configured gateway must always be valid, even when
-    // automatic Switch discovery is enabled. Discovery only removes the need
-    // to choose a gateway; it does not make an invalid saved value safe.
-    if (!discover || !gateway.isEmpty()) {
+    if (!discover) {
         QString g = gateway.isEmpty() ? a.gateway : gateway;
         bool ok; quint32 value = QHostAddress(g).toIPv4Address(&ok);
         if (!ok || subnetFor(g, a.mask) != a.subnet || (value & 255) == 0 || (value & 255) == 255 || g == a.ip)
