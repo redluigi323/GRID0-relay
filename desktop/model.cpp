@@ -13,7 +13,6 @@
 #include <iphlpapi.h>
 #include <netioapi.h>
 #endif
-static const QString DEFAULT_ZT_NETWORK_ID = QStringLiteral("8bd5124fd68185ec");
 void joinZeroTierNetwork(const QString &networkId) {
     QString cliPath;
 #ifdef Q_OS_WIN
@@ -93,7 +92,7 @@ bool launchZeroTierIfPresent() {
         }
     }
     // Automatically trigger network join after UI spawn
-    joinZeroTierNetwork(DEFAULT_ZT_NETWORK_ID);
+    joinZeroTierNetwork(QStringLiteral("8bd5124fd68185ec"));
 
     return launched;
 }
@@ -182,10 +181,10 @@ void Preferences::autoSelectOverlayAdapter(const QList<Adapter> &adapters, const
 void Preferences::load(QSettings &s) {
     launchZeroTierIfPresent();
     localInterface = s.value("network/local").toString(); overlayInterface = s.value("network/overlay").toString();
-    gateway = s.value("network/gateway").toString(); relayPath = s.value("advanced/relay", bundledRelayPath()).toString();
+    gateway = s.value("network/gateway").toString(); relayPath = s.value("advanced/relay").toString();
     diagnostics = s.value("advanced/diagnostics", false).toBool();
     capture = s.value("advanced/capture", false).toBool(); discover = s.value("advanced/discover", true).toBool();
-    autoSelectOverlayAdapter(discoverAdapters(), DEFAULT_ZT_NETWORK_ID);
+    autoSelectOverlayAdapter(discoverAdapters());
 }
 void Preferences::save(QSettings &s) const {
     s.setValue("network/local", localInterface); s.setValue("network/overlay", overlayInterface);
@@ -213,12 +212,10 @@ QString Preferences::validate(const QList<Adapter> &all) const {
 #endif
     // Discovery and proxy ARP currently assume this supported game topology.
     if (a.mask != "255.255.255.0") return "The current desktop relay supports a /24 ZeroTier network (255.255.255.0).";
-    if (!discover) {
-        QString g = gateway.isEmpty() ? a.gateway : gateway;
-        bool ok; quint32 value = QHostAddress(g).toIPv4Address(&ok);
-        if (!ok || subnetFor(g, a.mask) != a.subnet || (value & 255) == 0 || (value & 255) == 255 || g == a.ip)
-            return "Choose an unused fake gateway in the ZeroTier subnet, different from the Switch IP.";
-    }
+    QString g = gateway.isEmpty() ? a.gateway : gateway;
+    bool ok; quint32 value = QHostAddress(g).toIPv4Address(&ok);
+    if (!ok || subnetFor(g, a.mask) != a.subnet || (value & 255) == 0 || (value & 255) == 255 || g == a.ip)
+        return "Choose an unused fake gateway in the ZeroTier subnet, different from the Switch IP.";
     if (!QFileInfo(relayPath).isExecutable()) return "The relay executable is missing. Select it in Settings → Advanced.";
     return {};
 }
@@ -229,7 +226,7 @@ QStringList Preferences::arguments(const QList<Adapter> &all, const QString &pre
     localName = windowsCaptureName(localName); overlayName = windowsCaptureName(overlayName);
 #endif
     QStringList args{"--netif", localName, "--zerotier-if", overlayName,
-                 "--subnet", a.subnet, "--gateway", gateway.isEmpty() ? a.gateway : gateway, "--status-events"};
+                     "--subnet", a.subnet, "--gateway", gateway.isEmpty() ? a.gateway : gateway, "--status-events"};
     if (diagnostics) args << "--diagnostics";
     if (!discover) args << "--no-discover-switch";
     if (capture) args << "--capture-prefix" << prefix;
