@@ -35,7 +35,6 @@ signals:
     void message(const QString &);
     void lineReceived(const QString &);
     void switchDetected(const QString &);
-    void relayEvent(const QString &, const QString &);
 private:
     void setState(State);
     void receive(QByteArray);
