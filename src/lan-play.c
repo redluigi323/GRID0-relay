@@ -15,12 +15,6 @@ void lan_play_zerotier_pcap_handler(uv_pcap_t *handle, const struct pcap_pkthdr 
 static void switch_discovery_timer_cb(uv_timer_t *timer);
 static void diagnostic_log_frame(struct lan_play *lan_play, const char *direction, const u_char *packet, int len);
 
-static void relay_status_event(const char *event, const char *detail)
-{
-    if (!options.status_events) return;
-    if (detail && detail[0]) eprintf("%s %s\n", event, detail);
-    else eprintf("%s\n", event);
-}
 
 static const char *capture_suffixes[5] = {
     "wifi-rx", "wifi-tx", "zerotier-rx", "zerotier-tx", "host"
@@ -450,7 +444,6 @@ int init_pcap(struct lan_play *lan_play, char *netif, const char *subnet)
 {
     int ret = uv_pcap_init(lan_play->loop, &lan_play->pcap, lan_play_pcap_handler, netif, subnet);
     if (ret != 0) {
-        relay_status_event("ERROR_PCAP", lan_play->pcap.last_error);
         RETURN_ERR(lan_play, "Local capture: %s", lan_play->pcap.last_error);
     };
 
@@ -458,10 +451,7 @@ int init_pcap(struct lan_play *lan_play, char *netif, const char *subnet)
 }
 int init_zerotier_pcap(struct lan_play *lan_play, char *netif, const char *subnet) {
     int ret = uv_pcap_init(lan_play->loop, &lan_play->zerotier_pcap, lan_play_zerotier_pcap_handler, netif, subnet);
-    if (ret != 0) {
-        relay_status_event("ERROR_PCAP", lan_play->zerotier_pcap.last_error);
-        RETURN_ERR(lan_play, "ZeroTier capture: %s", lan_play->zerotier_pcap.last_error);
-    }
+    if (ret != 0) RETURN_ERR(lan_play, "ZeroTier capture: %s", lan_play->zerotier_pcap.last_error);
     lan_play->zerotier_pcap.data = lan_play; return 0;
 }
 
@@ -562,12 +552,6 @@ static bool learn_local_switch(struct lan_play *lp, const uint8_t *frame, size_t
     if (changed && (options.diagnostics || options.status_events))
         LLOG(LLOG_INFO, "Detected local Switch candidate: %u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x)",
             ip[0], ip[1], ip[2], ip[3], frame[6], frame[7], frame[8], frame[9], frame[10], frame[11]);
-    if (changed) {
-        char detail[96];
-        snprintf(detail, sizeof(detail), "ip=%u.%u.%u.%u mac=%02x:%02x:%02x:%02x:%02x:%02x",
-            ip[0], ip[1], ip[2], ip[3], frame[6], frame[7], frame[8], frame[9], frame[10], frame[11]);
-        relay_status_event("SWITCH_CONNECTED", detail);
-    }
     if (changed && options.diagnostics && !CMP_IPV4(ip, lp->zerotier_ip))
         LLOG(LLOG_WARNING, "For Splatoon with sys-zerotier, configure the stock Switch address as the managed ZeroTier address %u.%u.%u.%u",
             lp->zerotier_ip[0], lp->zerotier_ip[1], lp->zerotier_ip[2], lp->zerotier_ip[3]);
@@ -810,7 +794,6 @@ int lan_play_init(struct lan_play *lan_play)
             lan_play->packet_ctx.subnet_net[0], lan_play->packet_ctx.subnet_net[1], lan_play->packet_ctx.subnet_net[2]);
     }
 
-    relay_status_event("TUNNEL_READY", "zerotier=bound");
     return ret;
 }
 
