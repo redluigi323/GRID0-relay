@@ -537,7 +537,6 @@ int main(int argc, char **argv)
     if (!options.version) {
         char error[1024];
         if (zll_npcap_load(error, sizeof(error)) != 0) {
-            if (options.status_events) eprintf("ERROR_PCAP %s\n", error);
             eprintf("[ERROR]: %s\n", error); return 2;
         }
         eprintf("Capture runtime: %s\n", pcap_lib_version());
