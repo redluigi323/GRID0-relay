@@ -29,6 +29,7 @@ struct lan_play;
 #include "arp.h"
 #include "gateway.h"
 #include "pcaploop.h"
+#include "dhcp-server.h"
 
 #ifndef LANPLAY_VERSION
 #define LANPLAY_VERSION "unset"
@@ -63,7 +64,13 @@ struct lan_play {
     uv_timer_t switch_discovery_timer;
     uint8_t switch_discovery_host;
     uint16_t switch_discovery_pause_ticks;
+    bool switch_discovery_wifi_phase;
     uint8_t wifi_mac[6];
+    uint8_t wifi_ip[4];
+    uint8_t wifi_netmask[4];
+    uint8_t wifi_subnet[4];
+    uint8_t wifi_broadcast[4];
+    bool wifi_subnet_known;
     uint8_t zerotier_mac[6];
     uint8_t zerotier_ip[4];
     uint8_t zerotier_netmask[4];
@@ -72,8 +79,11 @@ struct lan_play {
     uint8_t switch_ip[4];
     bool switch_seen;
     bool switch_mac_confirmed;
+    bool switch_nintendo_oui;
+    bool switch_dhcp;
     uint64_t switch_mac_conflicts;
     bool warned_broadcast_mismatch;
+    struct dhcp_server_state dhcp_state;
     struct packet_ctx zerotier_neighbors;
     struct native_udp_guard *udp_guard;
     bool wifi_delivery_probe_sent;
@@ -114,6 +124,12 @@ struct lan_play {
 };
 
 int lan_play_send_packet(struct lan_play *lan_play, void *data, int size);
+/* Inject a raw IPv4 packet on the local Wi-Fi interface (used by the DHCP
+ * server for OFFER/ACK/NAK replies). */
+int lan_play_dhcp_send(struct lan_play *lan_play, const uint8_t *dst_mac,
+                       const uint8_t *ip, uint16_t ip_len);
+uint16_t ipv4_header_checksum(const uint8_t *packet, size_t len);
+uint16_t udp_checksum(const uint8_t *ip, size_t header_len, size_t total_len);
 int lan_play_send_zerotier_arp(struct lan_play *lan_play, const uint8_t *sender_ip, const uint8_t *target_ip);
 int lan_play_send_zerotier_arp_reply(struct lan_play *lan_play, const uint8_t *target_mac, const uint8_t *target_ip, const uint8_t *sender_ip);
 int lan_play_send_zerotier_ipv4(struct lan_play *lan_play, const void *dst_ip, const void *packet, uint16_t len);
@@ -134,6 +150,7 @@ struct cli_options {
     bool diagnostics;
     bool status_events;
     bool discover_switch;
+    bool dhcp_server;
     char *capture_prefix;
 
     char *netif_ipaddr;
