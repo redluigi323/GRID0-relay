@@ -38,6 +38,7 @@ with tempfile.TemporaryDirectory(prefix='zll-tests-') as tmp:
                     'lwip/custom', 'lwip/src/include'):
         cmd += ['-I' + str(root / include)]
     cmd += [str(root / 'tests/native_relay_test.c'), str(root / 'src/arp.c'),
+            str(root / 'src/dhcp-server.c'),
             str(build / 'base/libbase.a'), str(build / 'external/libuv/libuv_a.a'),
             '-lpcap', '-lpthread',
             '-Wl,-dead_strip' if sys.platform == 'darwin' else '-Wl,--gc-sections',
