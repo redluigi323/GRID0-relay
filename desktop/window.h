@@ -7,8 +7,6 @@
 #include <QPushButton>
 #include <QComboBox>
 #include <QCheckBox>
-#include <QRadioButton>
-#include <QGroupBox>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 
@@ -36,9 +34,7 @@ private:
     QComboBox *local, *overlay;
     QLineEdit *gateway, *executable;
     QCheckBox *diagnostics, *capture, *discovery;
-    QRadioButton *manualMode, *autoMode;
-    QGroupBox *switchSettingsGroup;
-    QLabel *status, *switchStatus, *address, *mask, *gatewayValue, *validation, *settingsHint, *dhcpHint;
+    QLabel *status, *switchStatus, *address, *mask, *gatewayValue, *validation;
     QLabel *requirements = nullptr;
     QPushButton *start, *stop, *refresh, *setupRequirements = nullptr;
     QPlainTextEdit *log;
