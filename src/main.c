@@ -183,7 +183,6 @@ int parse_arguments(int argc, char **argv)
     options.diagnostics = false;
     options.status_events = false;
     options.discover_switch = true;
-    options.dhcp_server = false;
 
     options.netif = NULL;
     options.zerotier_if = NULL;
@@ -288,8 +287,6 @@ int parse_arguments(int argc, char **argv)
             options.diagnostics = true;
         } else if (!strcmp(arg, "--no-discover-switch")) {
             options.discover_switch = false;
-        } else if (!strcmp(arg, "--dhcp")) {
-            options.dhcp_server = true;
         } else if (!strcmp(arg, "--broadcast")) {
             options.broadcast = true;
             options.relay_server_addr = "255.255.255.255:11451";
@@ -373,7 +370,6 @@ void print_help(const char *name)
         "        [--status-events] print console detection without packet diagnostics\n"
         "        [--capture-prefix <path>] save five packet traces, including game payloads\n"
         "        [--no-discover-switch] disable automatic local Switch ARP discovery\n"
-        "        [--dhcp] run a DHCP server for Automatic/DHCP Switches (Nintendo devices only)\n"
         "        [--pmtu <pmtu>]\n"
         "        [--socks5-server-addr <addr>]\n"
         "        [--rpc <address>]\n"
