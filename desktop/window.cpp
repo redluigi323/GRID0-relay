@@ -85,12 +85,6 @@ Window::Window(bool preview) : previewMode(preview) {
     stop = new QPushButton("Stop relay");
     actions->addWidget(start); actions->addWidget(stop); actions->addStretch(); summaryLayout->addLayout(actions); playLayout->addWidget(summary);
     auto *group = new QGroupBox("Enter these settings on your Switch"); auto *form = new QGridLayout(group);
-    switchSettingsGroup = group;
-    auto *modeRow = new QHBoxLayout;
-    manualMode = new QRadioButton("Manual IP settings"); autoMode = new QRadioButton("Automatic (DHCP)");
-    manualMode->setObjectName("manualMode"); autoMode->setObjectName("autoMode");
-    modeRow->addWidget(manualMode); modeRow->addWidget(autoMode); modeRow->addStretch();
-    playLayout->addLayout(modeRow);
     group->setObjectName("switchSettings");
     form->setSizeConstraint(QLayout::SetMinimumSize);
     group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
