@@ -1,7 +1,6 @@
 #include "lan-play.h"
 #include "sha1.h"
 #include "native-udp.h"
-#include "nintendo_oui.h"
 
 #define RETURN_ERR(lan_play, ...) \
     do { \
@@ -134,15 +133,7 @@ static bool is_zerotier_destination(const struct lan_play *lan_play, const uint8
     return true;
 }
 
-static bool ip_in_subnet(const uint8_t ip[4], const uint8_t net[4], const uint8_t mask[4])
-{
-    for (int i = 0; i < 4; ++i) {
-        if ((ip[i] & mask[i]) != net[i]) return false;
-    }
-    return true;
-}
-
-uint16_t ipv4_header_checksum(const uint8_t *packet, size_t len)
+static uint16_t ipv4_header_checksum(const uint8_t *packet, size_t len)
 {
     uint32_t sum = 0;
     for (size_t i = 0; i + 1 < len; i += 2) sum += ((uint16_t)packet[i] << 8) | packet[i + 1];
@@ -161,7 +152,7 @@ static void checksum_add_bytes(uint32_t *sum, const uint8_t *bytes, size_t len)
     if (len) *sum += (uint16_t)bytes[0] << 8;
 }
 
-uint16_t udp_checksum(const uint8_t *ip, size_t header_len, size_t total_len)
+static uint16_t udp_checksum(const uint8_t *ip, size_t header_len, size_t total_len)
 {
     const uint8_t *udp = ip + header_len;
     const size_t udp_len = total_len - header_len;
@@ -211,12 +202,6 @@ static int lan_play_send_wifi_ipv4(struct lan_play *lan_play, const uint8_t *dst
     return lan_play_send_packet(lan_play, frame, ip_len + ETHER_HEADER_LEN);
 }
 
-int lan_play_dhcp_send(struct lan_play *lan_play, const uint8_t *dst_mac,
-                       const uint8_t *ip, uint16_t ip_len)
-{
-    return lan_play_send_wifi_ipv4(lan_play, dst_mac, ip, ip_len);
-}
-
 static bool lan_play_relay_wifi_ipv4(struct lan_play *lan_play, const u_char *frame, uint16_t frame_len)
 {
     const uint8_t *ip = frame + ETHER_HEADER_LEN;
@@ -262,9 +247,7 @@ static bool lan_play_relay_wifi_ipv4(struct lan_play *lan_play, const u_char *fr
 
 static void probe_wifi_delivery(struct lan_play *lp)
 {
-    /* Fire once per run, on discovery or first game broadcast: a single ICMP
-     * echo is cheap and confirms the Wi-Fi path before the user needs it. */
-    if (lp->wifi_delivery_probe_sent) return;
+    if (!options.diagnostics || lp->wifi_delivery_probe_sent) return;
     uint8_t ip[44] = {0};
     ip[0] = 0x45; ip[8] = 64; ip[9] = 1;
     WRITE_NET16(ip, 2, sizeof(ip));
@@ -275,11 +258,7 @@ static void probe_wifi_delivery(struct lan_play *lp)
     memcpy(lp->wifi_delivery_probe_payload + 8, &nonce, sizeof(nonce));
     memcpy(ip + 28, lp->wifi_delivery_probe_payload, 16);
     WRITE_NET16(ip, 22, ipv4_header_checksum(ip + 20, 24));
-    /* DHCP/Automatic consoles live on the Wi-Fi subnet, so probe from the
-     * Wi-Fi address; the fake gateway address is off their subnet and the
-     * reply would go to the real router instead of us. */
-    const uint8_t *probe_src = lp->switch_dhcp ? lp->wifi_ip : lp->packet_ctx.ip;
-    rewrite_ipv4_addresses(ip, sizeof(ip), probe_src, lp->switch_ip);
+    rewrite_ipv4_addresses(ip, sizeof(ip), lp->packet_ctx.ip, lp->switch_ip);
     CPY_IPV4(lp->wifi_delivery_probe_ip, lp->switch_ip);
     CPY_MAC(lp->wifi_delivery_probe_mac, lp->switch_mac);
     lp->wifi_delivery_probe_sent = true;
@@ -299,8 +278,7 @@ static bool consume_wifi_delivery_reply(struct lan_play *lp, const uint8_t *fram
     size_t total = READ_NET16(ip, 2);
     if (ip[0] >> 4 != 4 || hlen < 20 || total != hlen + 24 || total > len - 14 ||
         ip[9] != 1 || (READ_NET16(ip, 6) & 0x3fff) ||
-        !CMP_IPV4(ip + 12, lp->wifi_delivery_probe_ip) ||
-        !CMP_IPV4(ip + 16, lp->switch_dhcp ? lp->wifi_ip : lp->packet_ctx.ip)) return false;
+        !CMP_IPV4(ip + 12, lp->wifi_delivery_probe_ip) || !CMP_IPV4(ip + 16, lp->packet_ctx.ip)) return false;
     const uint8_t *icmp = ip + hlen;
     if (icmp[0] || icmp[1] || READ_NET16(icmp, 4) != 0x5a4c || READ_NET16(icmp, 6) != 1 ||
         memcmp(icmp + 8, lp->wifi_delivery_probe_payload, 16) ||
@@ -416,8 +394,7 @@ static void diagnostic_count_rx(struct lan_play *lan_play, bool zerotier, const 
     }
 }
 
-static int lan_play_send_wifi_arp_probe(struct lan_play *lan_play, const uint8_t target_ip[4],
-                                          const uint8_t sender_ip[4])
+static int lan_play_send_wifi_arp_probe(struct lan_play *lan_play, const uint8_t target_ip[4])
 {
     uint8_t frame[ETHER_HEADER_LEN + ARP_LEN] = {0};
     memset(frame + ETHER_OFF_DST, 0xff, 6);
@@ -429,7 +406,7 @@ static int lan_play_send_wifi_arp_probe(struct lan_play *lan_play, const uint8_t
     WRITE_NET8(frame, ETHER_HEADER_LEN + ARP_OFF_PROTOCOL_SIZE, 4);
     WRITE_NET16(frame, ETHER_HEADER_LEN + ARP_OFF_OPCODE, ARP_OPCODE_REQUEST);
     CPY_MAC(frame + ETHER_HEADER_LEN + ARP_OFF_SENDER_MAC, lan_play->wifi_mac);
-    CPY_IPV4(frame + ETHER_HEADER_LEN + ARP_OFF_SENDER_IP, sender_ip);
+    CPY_IPV4(frame + ETHER_HEADER_LEN + ARP_OFF_SENDER_IP, lan_play->packet_ctx.ip);
     CPY_IPV4(frame + ETHER_HEADER_LEN + ARP_OFF_TARGET_IP, target_ip);
 
     lan_play->wifi_probe_tx++;
@@ -450,35 +427,16 @@ static void switch_discovery_timer_cb(uv_timer_t *timer)
         return;
     }
 
-    /* Sweep the Wi-Fi subnet first (finds DHCP/Automatic consoles), then the
-     * ZeroTier subnet (finds manually configured consoles), then pause. */
     uint8_t target_ip[4];
-    const uint8_t *sender_ip = lan_play->packet_ctx.ip;
-    bool wifi_phase = lan_play->switch_discovery_wifi_phase && lan_play->wifi_subnet_known;
-    if (wifi_phase) {
-        /* Probe our own /24; that is where DHCP peers live. */
-        CPY_IPV4(target_ip, lan_play->wifi_ip);
-        sender_ip = lan_play->wifi_ip;
-    } else {
-        CPY_IPV4(target_ip, lan_play->packet_ctx.subnet_net);
-    }
+    CPY_IPV4(target_ip, lan_play->packet_ctx.subnet_net);
     target_ip[3] = lan_play->switch_discovery_host;
-    if (wifi_phase && target_ip[3] == lan_play->wifi_ip[3]) {
-        /* Never probe ourselves. */
-    } else {
-        lan_play_send_wifi_arp_probe(lan_play, target_ip, sender_ip);
-    }
+    lan_play_send_wifi_arp_probe(lan_play, target_ip);
 
     lan_play->switch_discovery_host++;
     if (lan_play->switch_discovery_host == 0 || lan_play->switch_discovery_host == 255) {
         lan_play->switch_discovery_host = 2;
-        if (wifi_phase) {
-            lan_play->switch_discovery_wifi_phase = false; /* Wi-Fi sweep done; now the ZeroTier subnet. */
-        } else {
-            lan_play->switch_discovery_wifi_phase = lan_play->wifi_subnet_known; /* Start over with Wi-Fi. */
-            lan_play->switch_discovery_pause_ticks = 600; // 30 seconds at 50ms per tick
-            if (options.diagnostics) LLOG(LLOG_INFO, "No Switch response yet; retrying ARP discovery in 30 seconds");
-        }
+        lan_play->switch_discovery_pause_ticks = 600; // 30 seconds at 50ms per tick
+        if (options.diagnostics) LLOG(LLOG_INFO, "No Switch response yet; retrying ARP discovery in 30 seconds");
     }
 }
 
@@ -573,21 +531,11 @@ static bool learn_local_switch(struct lan_play *lp, const uint8_t *frame, size_t
             (CMP_IPV4(body + IPV4_OFF_DST, lp->zerotier_broadcast_ip) ||
              is_nintendo_lan_broadcast(body + IPV4_OFF_DST));
     } else return false;
-    const bool zt_dest = is_zerotier_destination(lp, ip);
-    const bool wifi_dest = lp->wifi_subnet_known &&
-        ip_in_subnet(ip, lp->wifi_subnet, lp->wifi_netmask);
-    if ((!zt_dest && !wifi_dest) || CMP_IPV4(ip, lp->zerotier_broadcast_ip) ||
+    if (!is_zerotier_destination(lp, ip) || CMP_IPV4(ip, lp->zerotier_broadcast_ip) ||
         CMP_IPV4(ip, lp->packet_ctx.ip)) return false;
-    if (wifi_dest && (CMP_IPV4(ip, lp->wifi_broadcast) || CMP_IPV4(ip, lp->wifi_subnet))) return false;
     bool network = true;
     for (int i = 0; i < 4; ++i) if (ip[i] & (uint8_t)~lp->zerotier_netmask[i]) network = false;
     if (network) return false;
-    /* DHCP candidates on the Wi-Fi subnet must carry a Nintendo OUI, otherwise
-     * the first chatty device (usually the router) would claim the single
-     * Switch slot and stop discovery. Manually configured ZeroTier-subnet
-     * consoles keep the previous behavior. */
-    const bool dhcp = wifi_dest && !zt_dest;
-    if (dhcp && !is_nintendo_mac(frame + 6)) return false;
     if (lp->switch_seen && !CMP_IPV4(ip, lp->switch_ip)) return false;
     bool changed = !lp->switch_seen || !CMP_MAC(frame + 6, lp->switch_mac);
     if (lp->switch_seen && changed && (lp->switch_mac_confirmed || !direct)) {
@@ -601,24 +549,9 @@ static bool learn_local_switch(struct lan_play *lp, const uint8_t *frame, size_t
     CPY_MAC(lp->switch_mac, frame + 6);
     lp->switch_seen = true;
     lp->switch_mac_confirmed |= direct;
-    if (changed) {
-        /* Pre-seed the local ARP cache so inbound delivery and proxy ARP
-         * resolve immediately instead of waiting for the next ARP exchange. */
-        arp_set(&lp->packet_ctx, frame + 6, ip);
-        lp->switch_dhcp = dhcp;
-        if (is_nintendo_mac(frame + 6)) {
-            lp->switch_nintendo_oui = true;
-            LLOG(LLOG_INFO, "Switch candidate carries a Nintendo vendor prefix; treating as console");
-        }
-        if (dhcp)
-            LLOG(LLOG_INFO, "Switch candidate uses a DHCP/Automatic address on the Wi-Fi subnet");
-        /* Confirm the Wi-Fi path right away instead of waiting for game traffic. */
-        probe_wifi_delivery(lp);
-    }
     if (changed && (options.diagnostics || options.status_events))
-        LLOG(LLOG_INFO, "Detected local Switch candidate: %u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x)%s",
-            ip[0], ip[1], ip[2], ip[3], frame[6], frame[7], frame[8], frame[9], frame[10], frame[11],
-            dhcp ? " [DHCP/Automatic]" : "");
+        LLOG(LLOG_INFO, "Detected local Switch candidate: %u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x)",
+            ip[0], ip[1], ip[2], ip[3], frame[6], frame[7], frame[8], frame[9], frame[10], frame[11]);
     if (changed && options.diagnostics && !CMP_IPV4(ip, lp->zerotier_ip))
         LLOG(LLOG_WARNING, "For Splatoon with sys-zerotier, configure the stock Switch address as the managed ZeroTier address %u.%u.%u.%u",
             lp->zerotier_ip[0], lp->zerotier_ip[1], lp->zerotier_ip[2], lp->zerotier_ip[3]);
@@ -637,9 +570,6 @@ void lan_play_pcap_handler(uv_pcap_t *handle, const struct pcap_pkthdr *pkt_head
     diagnostic_count_rx(lan_play, false, packet, pkt_header->caplen);
     diagnostic_log_frame(lan_play, "RX Wi-Fi", packet, pkt_header->caplen);
     if (consume_wifi_delivery_reply(lan_play, packet, pkt_header->caplen)) return;
-    /* DHCP client traffic is answered locally when --dhcp is on; it must
-     * never reach discovery or the ZeroTier relay path. */
-    if (dhcp_server_consume(lan_play, packet, pkt_header->caplen)) return;
     if (!learn_local_switch(lan_play, packet, pkt_header->caplen)) return;
     packet_set_mac(&lan_play->packet_ctx, mac);
     if (pkt_header->caplen >= ETHER_HEADER_LEN + IPV4_HEADER_LEN &&
@@ -723,7 +653,6 @@ int lan_play_init(struct lan_play *lan_play)
 
     arp_list_init(lan_play->zerotier_neighbors.arp_list);
     lan_play->zerotier_neighbors.arp_ttl = 30;
-    dhcp_server_init(lan_play);
     lan_play->broadcast = options.broadcast;
     lan_play->pmtu = options.pmtu;
 
@@ -772,18 +701,6 @@ int lan_play_init(struct lan_play *lan_play)
     ret = uv_pcap_get_mac(&lan_play->pcap, lan_play->wifi_mac);
     if (ret != 0) {
         RETURN_ERR(lan_play, "Could not obtain the Wi-Fi adapter MAC address");
-    }
-    eprintf("native init: reading Wi-Fi adapter IPv4\n");
-    if (uv_pcap_get_ipv4(&lan_play->pcap, lan_play->wifi_ip, lan_play->wifi_netmask) == 0) {
-        int i;
-        for (i = 0; i < 4; ++i) lan_play->wifi_subnet[i] = lan_play->wifi_ip[i] & lan_play->wifi_netmask[i];
-        for (i = 0; i < 4; ++i) lan_play->wifi_broadcast[i] = lan_play->wifi_subnet[i] | (uint8_t)~lan_play->wifi_netmask[i];
-        lan_play->wifi_subnet_known = true;
-        LLOG(LLOG_INFO, "Wi-Fi subnet: %u.%u.%u.%u/%u.%u.%u.%u (DHCP/Automatic consoles will be discovered here)",
-            lan_play->wifi_subnet[0], lan_play->wifi_subnet[1], lan_play->wifi_subnet[2], lan_play->wifi_subnet[3],
-            lan_play->wifi_netmask[0], lan_play->wifi_netmask[1], lan_play->wifi_netmask[2], lan_play->wifi_netmask[3]);
-    } else {
-        LLOG(LLOG_WARNING, "Could not obtain an IPv4 address from the Wi-Fi adapter; DHCP/Automatic Switch discovery is disabled");
     }
     eprintf("native init: reading ZeroTier adapter MAC\n");
     ret = uv_pcap_get_mac(&lan_play->zerotier_pcap, lan_play->zerotier_mac);
@@ -868,21 +785,13 @@ int lan_play_init(struct lan_play *lan_play)
     if (options.discover_switch) {
         lan_play->switch_discovery_host = 2;
         lan_play->switch_discovery_pause_ticks = 0;
-        lan_play->switch_discovery_wifi_phase = lan_play->wifi_subnet_known;
         ret = uv_timer_init(lan_play->loop, &lan_play->switch_discovery_timer);
         if (ret != 0) RETURN_ERR(lan_play, "Could not initialize Switch discovery timer: %d", ret);
         lan_play->switch_discovery_timer.data = lan_play;
         ret = uv_timer_start(&lan_play->switch_discovery_timer, switch_discovery_timer_cb, 50, 50);
         if (ret != 0) RETURN_ERR(lan_play, "Could not start Switch discovery timer: %d", ret);
-        if (options.diagnostics) {
-            if (lan_play->wifi_subnet_known)
-                LLOG(LLOG_INFO, "Searching %u.%u.%u.2-254 (Wi-Fi/DHCP) then %u.%u.%u.2-254 (ZeroTier/manual) for a local Switch using ARP probes",
-                    lan_play->wifi_ip[0], lan_play->wifi_ip[1], lan_play->wifi_ip[2],
-                    lan_play->packet_ctx.subnet_net[0], lan_play->packet_ctx.subnet_net[1], lan_play->packet_ctx.subnet_net[2]);
-            else
-                LLOG(LLOG_INFO, "Searching %u.%u.%u.2-254 for a local Switch using ARP probes",
-                    lan_play->packet_ctx.subnet_net[0], lan_play->packet_ctx.subnet_net[1], lan_play->packet_ctx.subnet_net[2]);
-        }
+        if (options.diagnostics) LLOG(LLOG_INFO, "Searching %u.%u.%u.2-254 for a local Switch using ARP probes",
+            lan_play->packet_ctx.subnet_net[0], lan_play->packet_ctx.subnet_net[1], lan_play->packet_ctx.subnet_net[2]);
     }
 
     return ret;
