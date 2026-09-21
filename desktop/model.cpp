@@ -185,12 +185,14 @@ void Preferences::load(QSettings &s) {
     gateway = s.value("network/gateway").toString(); relayPath = s.value("advanced/relay").toString();
     diagnostics = s.value("advanced/diagnostics", false).toBool();
     capture = s.value("advanced/capture", false).toBool(); discover = s.value("advanced/discover", true).toBool();
+    dhcp = s.value("network/dhcp", false).toBool();
     autoSelectOverlayAdapter(discoverAdapters());
 }
 void Preferences::save(QSettings &s) const {
     s.setValue("network/local", localInterface); s.setValue("network/overlay", overlayInterface);
     s.setValue("network/gateway", gateway); s.setValue("advanced/relay", relayPath);
     s.setValue("advanced/diagnostics", diagnostics); s.setValue("advanced/capture", capture);
+    s.setValue("network/dhcp", dhcp); s.sync();
     s.setValue("advanced/discover", discover); s.sync();
 }
 Adapter Preferences::overlay(const QList<Adapter> &all) const {
@@ -230,6 +232,7 @@ QStringList Preferences::arguments(const QList<Adapter> &all, const QString &pre
                      "--subnet", a.subnet, "--gateway", gateway.isEmpty() ? a.gateway : gateway, "--status-events"};
     if (diagnostics) args << "--diagnostics";
     if (!discover) args << "--no-discover-switch";
+    if (dhcp) args << "--dhcp";
     if (capture) args << "--capture-prefix" << prefix;
     return args;
 }

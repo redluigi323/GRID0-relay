@@ -85,6 +85,12 @@ Window::Window(bool preview) : previewMode(preview) {
     stop = new QPushButton("Stop relay");
     actions->addWidget(start); actions->addWidget(stop); actions->addStretch(); summaryLayout->addLayout(actions); playLayout->addWidget(summary);
     auto *group = new QGroupBox("Enter these settings on your Switch"); auto *form = new QGridLayout(group);
+    switchSettingsGroup = group;
+    auto *modeRow = new QHBoxLayout;
+    manualMode = new QRadioButton("Manual IP settings"); autoMode = new QRadioButton("Automatic (DHCP)");
+    manualMode->setObjectName("manualMode"); autoMode->setObjectName("autoMode");
+    modeRow->addWidget(manualMode); modeRow->addWidget(autoMode); modeRow->addStretch();
+    playLayout->addLayout(modeRow);
     group->setObjectName("switchSettings");
     form->setSizeConstraint(QLayout::SetMinimumSize);
     group->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
@@ -114,7 +120,10 @@ Window::Window(bool preview) : previewMode(preview) {
     connect(copy, &QPushButton::clicked, this, [this] {
         QApplication::clipboard()->setText("IP address: " + address->text() + "\nSubnet mask: " + mask->text() + "\nGateway: " + gatewayValue->text());
     });
-    playLayout->addWidget(text("Use the exact subnet mask shown here. After changing network settings, reconnect your Switch and restart the game before entering LAN mode."));
+    settingsHint = text("Use the exact subnet mask shown here. After changing network settings, reconnect your Switch and restart the game before entering LAN mode.");
+    playLayout->addWidget(settingsHint);
+    dhcpHint = text("Set your Switch to Automatic. When the relay starts it runs a DHCP server that gives Nintendo consoles a ZeroTier-subnet address — nothing to type in.");
+    playLayout->addWidget(dhcpHint);
     validation = text(""); playLayout->addWidget(validation);
     auto *configure = new QPushButton("Connection settings…"); playLayout->addWidget(configure, 0, Qt::AlignLeft);
     connect(configure, &QPushButton::clicked, this, [this] { tabs->setCurrentIndex(1); });
@@ -177,6 +186,8 @@ Window::Window(bool preview) : previewMode(preview) {
     for (auto *combo : {local, overlay}) connect(combo, &QComboBox::currentIndexChanged, this, [this] { save(); });
     for (auto *edit : {gateway, executable}) connect(edit, &QLineEdit::textChanged, this, [this] { save(); });
     for (auto *check : {diagnostics, capture, discovery}) connect(check, &QCheckBox::toggled, this, [this] { save(); });
+    manualMode->setChecked(!preferences.dhcp); autoMode->setChecked(preferences.dhcp);
+    for (auto *mode : {manualMode, autoMode}) connect(mode, &QRadioButton::toggled, this, [this] { save(); });
     connect(choose, &QPushButton::clicked, this, [this] {
         if (relay.busy()) return;
         auto path = QFileDialog::getOpenFileName(this, "Choose relay executable", executable->text());
@@ -232,6 +243,7 @@ void Window::save() {
     const QString bundled = bundledRelayPath();
     if (preferences.relayPath.isEmpty()) preferences.relayPath = bundled;
     preferences.diagnostics = diagnostics->isChecked(); preferences.capture = capture->isChecked(); preferences.discover = discovery->isChecked();
+    preferences.dhcp = autoMode->isChecked();
     if (!previewMode) {
         auto stored = preferences;
         if (stored.relayPath == bundled) stored.relayPath.clear(); // Moving the app must not leave a stale path.
@@ -244,11 +256,14 @@ void Window::updateState() {
     address->setText(a.ip.isEmpty() ? "—" : a.ip); mask->setText(a.mask.isEmpty() ? "—" : a.mask);
     gatewayValue->setText(preferences.gateway.isEmpty() ? (a.gateway.isEmpty() ? "—" : a.gateway) : preferences.gateway);
     auto error = preferences.validate(adapters); validation->setText(error);
+    switchSettingsGroup->setVisible(!preferences.dhcp);
+    settingsHint->setVisible(!preferences.dhcp);
+    dhcpHint->setVisible(preferences.dhcp);
     if (!relay.busy()) status->setText(error.isEmpty() ? "Ready to connect" : "Finish connection setup");
     start->setEnabled(!relay.busy() && error.isEmpty()); stop->setEnabled(relay.busy() && relay.state() != RelayController::Stopping);
     stop->setText(relay.state() == RelayController::Authorizing ? "Cancel" : "Stop relay");
     configuration->setEnabled(!relay.busy());
-    for (QWidget *w : std::initializer_list<QWidget *>{diagnostics, capture, discovery, executable}) w->setEnabled(!relay.busy());
+    for (QWidget *w : std::initializer_list<QWidget *>{diagnostics, capture, discovery, executable, manualMode, autoMode}) w->setEnabled(!relay.busy());
 }
 void Window::checkDependencies() {
     if (!requirements || !setupRequirements) return;

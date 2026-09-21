@@ -25,7 +25,7 @@ QStringList getZeroTierNetworkIPs(const QString &networkId = QStringLiteral("8bd
 
 struct Preferences {
     QString localInterface, overlayInterface, gateway, relayPath;
-    bool diagnostics = false, capture = false, discover = true;
+    bool diagnostics = false, capture = false, discover = true, dhcp = false;
     void load(QSettings &settings);
     void save(QSettings &settings) const;
     QString validate(const QList<Adapter> &adapters) const;
