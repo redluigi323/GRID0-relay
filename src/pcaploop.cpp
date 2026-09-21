@@ -59,30 +59,14 @@ static void int2mac(const uint64_t i, uint8_t *mac)
     memcpy(mac, &i, 6);
 }
 
-static int mask_to_prefix(const uint8_t mask[4])
+static int set_filter(pcap_t *dev, const uint8_t *mac, const char *subnet)
 {
-    int prefix = 0;
-    for (int i = 0; i < 4; ++i) {
-        uint8_t m = mask[i];
-        while (m & 0x80) {
-            prefix++;
-            m <<= 1;
-        }
-        if (m) break; /* Non-contiguous mask; stop at the first gap. */
-    }
-    return prefix;
-}
-
-static int set_filter(pcap_t *dev, const uint8_t *mac, const char *match)
-{
-    char filter[384];
+    char filter[256];
     static struct bpf_program bpf;
 
     // Include host-originated ICMP errors for diagnostics. The relay handlers
     // explicitly discard host frames, so these can never loop through the bridge.
-    // ARP always passes: Switch discovery depends on ARP replies, which the
-    // `net` primitive would otherwise drop (ARP is not IP).
-    snprintf(filter, sizeof(filter), "(%s) and (not ether src %02x:%02x:%02x:%02x:%02x:%02x or icmp)", match,
+    snprintf(filter, sizeof(filter), "net %s and (not ether src %02x:%02x:%02x:%02x:%02x:%02x or icmp)", subnet,
         mac[0],
         mac[1],
         mac[2],
@@ -255,24 +239,7 @@ int uv_pcap_open_live(
     }
 
     stage = "capture filter";
-    {
-        /* The interface's own subnet must pass so DHCP/Automatic consoles on
-         * the local Wi-Fi are visible, and ARP must always pass because
-         * Switch discovery depends on ARP replies (`net` alone drops them).
-         * UDP ports 67/68 must pass so the DHCP server sees client DISCOVER
-         * and REQUEST packets, which come from 0.0.0.0 and match no `net`. */
-        char match[256];
-        if (interf->has_ipv4 &&
-            (interf->netmask[0] | interf->netmask[1] | interf->netmask[2] | interf->netmask[3])) {
-            uint8_t subnet[4];
-            for (int i = 0; i < 4; ++i) subnet[i] = interf->ipv4[i] & interf->netmask[i];
-            snprintf(match, sizeof(match), "net %s or net %u.%u.%u.%u/%d or arp or udp port 67 or udp port 68", subnet,
-                subnet[0], subnet[1], subnet[2], subnet[3], mask_to_prefix(interf->netmask));
-        } else {
-            snprintf(match, sizeof(match), "net %s or arp or udp port 67 or udp port 68", subnet);
-        }
-        if (set_filter(dev, mac, match) != 0) goto fail;
-    }
+    if (set_filter(dev, mac, subnet) != 0) goto fail;
 
     stage = "immediate capture mode";
     if (set_immediate_mode(dev) == -1) {
