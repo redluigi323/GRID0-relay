@@ -72,6 +72,7 @@ struct lan_play {
     uint8_t switch_ip[4];
     bool switch_seen;
     bool switch_mac_confirmed;
+    bool switch_nintendo_oui;
     uint64_t switch_mac_conflicts;
     bool warned_broadcast_mismatch;
     struct packet_ctx zerotier_neighbors;

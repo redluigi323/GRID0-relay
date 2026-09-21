@@ -1,6 +1,7 @@
 #include "lan-play.h"
 #include "sha1.h"
 #include "native-udp.h"
+#include "nintendo_oui.h"
 
 #define RETURN_ERR(lan_play, ...) \
     do { \
@@ -247,7 +248,9 @@ static bool lan_play_relay_wifi_ipv4(struct lan_play *lan_play, const u_char *fr
 
 static void probe_wifi_delivery(struct lan_play *lp)
 {
-    if (!options.diagnostics || lp->wifi_delivery_probe_sent) return;
+    /* Fire once per run, on discovery or first game broadcast: a single ICMP
+     * echo is cheap and confirms the Wi-Fi path before the user needs it. */
+    if (lp->wifi_delivery_probe_sent) return;
     uint8_t ip[44] = {0};
     ip[0] = 0x45; ip[8] = 64; ip[9] = 1;
     WRITE_NET16(ip, 2, sizeof(ip));
@@ -549,6 +552,17 @@ static bool learn_local_switch(struct lan_play *lp, const uint8_t *frame, size_t
     CPY_MAC(lp->switch_mac, frame + 6);
     lp->switch_seen = true;
     lp->switch_mac_confirmed |= direct;
+    if (changed) {
+        /* Pre-seed the local ARP cache so inbound delivery and proxy ARP
+         * resolve immediately instead of waiting for the next ARP exchange. */
+        arp_set(&lp->packet_ctx, frame + 6, ip);
+        if (is_nintendo_mac(frame + 6)) {
+            lp->switch_nintendo_oui = true;
+            LLOG(LLOG_INFO, "Switch candidate carries a Nintendo vendor prefix; treating as console");
+        }
+        /* Confirm the Wi-Fi path right away instead of waiting for game traffic. */
+        probe_wifi_delivery(lp);
+    }
     if (changed && (options.diagnostics || options.status_events))
         LLOG(LLOG_INFO, "Detected local Switch candidate: %u.%u.%u.%u (%02x:%02x:%02x:%02x:%02x:%02x)",
             ip[0], ip[1], ip[2], ip[3], frame[6], frame[7], frame[8], frame[9], frame[10], frame[11]);
