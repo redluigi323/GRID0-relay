@@ -68,7 +68,7 @@ static int mask_to_prefix(const uint8_t mask[4])
             prefix++;
             m <<= 1;
         }
-        if (m) break; /* Non-contiguous mask; stop at the first gap. */
+        if (m) break;
     }
     return prefix;
 }
