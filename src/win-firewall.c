@@ -1,14 +1,13 @@
 #ifdef _WIN32
 
 #include "win-firewall.h"
-
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
 
 #define FW_RULE_NAME "GRID0 - block hotspot DHCP"
 
-/* Run netsh without flashing a console window. */
+/* Runs netsh without flashing a console window. */
 static void run_netsh(const char *args)
 {
     char cmd[512];
@@ -33,8 +32,6 @@ static void run_netsh(const char *args)
 
 void winfw_set_hotspot_dhcp_block(bool enable)
 {
-    /* Delete first: makes enable idempotent and removes stale rules left
-     * by a previous crash or manual PowerShell duplicates. */
     run_netsh("delete rule name=\"" FW_RULE_NAME "\"");
     if (enable) {
         run_netsh("add rule name=\"" FW_RULE_NAME "\" dir=out protocol=udp localport=67 action=block");
