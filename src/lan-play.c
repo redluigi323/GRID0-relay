@@ -2,6 +2,7 @@
 #include "sha1.h"
 #include "native-udp.h"
 #include "nintendo_oui.h"
+#include "win-firewall.h"
 
 #define RETURN_ERR(lan_play, ...) \
     do { \
@@ -577,6 +578,9 @@ int lan_play_close(struct lan_play *lan_play)
     ret = gateway_close(lan_play->gateway);
     if (ret != 0) return ret;
 
+    /* Remove the hotspot-DHCP firewall block (no-op if --dhcp was off). */
+    winfw_set_hotspot_dhcp_block(false);
+
     return 0;
 }
 
@@ -764,6 +768,11 @@ int lan_play_init(struct lan_play *lan_play)
     arp_list_init(lan_play->zerotier_neighbors.arp_list);
     lan_play->zerotier_neighbors.arp_ttl = 30;
     dhcp_server_init(lan_play);
+    /* On Windows, starting with --dhcp also installs a firewall rule that
+     * blocks the PC's own hotspot DHCP server (outbound UDP/67), so the
+     * relay's DHCP server is the only one answering the Switch. The call
+     * is idempotent and also clears stale rules when --dhcp is off. */
+    winfw_set_hotspot_dhcp_block(options.dhcp_server);
     lan_play->broadcast = options.broadcast;
     lan_play->pmtu = options.pmtu;
 

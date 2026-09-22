@@ -52,7 +52,7 @@ endif()
 target_include_directories(grid0-relay PRIVATE ${PCAP_INCLUDE_DIR})
 
 if (WIN32)
-    target_sources(grid0-relay PRIVATE npcap-loader.c)
+    target_sources(grid0-relay PRIVATE npcap-loader.c win-firewall.c)
     target_link_libraries(grid0-relay ws2_32 iphlpapi psapi userenv shell32)
     target_compile_definitions(grid0-relay PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
 else()
