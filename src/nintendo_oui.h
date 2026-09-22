@@ -7,9 +7,6 @@
  * a matching prefix strongly suggests the device is a Nintendo console, but
  * a non-match must NOT disqualify a candidate (a docked Switch behind a
  * third-party USB Ethernet adapter, or a future OUI, would not match).
- *
- * This table mirrors NINTENDO_OUI_PREFIXES from the Qt-side ARP-table
- * scanner so both discovery paths agree. Extend it there first, then here.
  */
 
 #include <stdint.h>
