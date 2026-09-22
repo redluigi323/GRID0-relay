@@ -154,6 +154,10 @@ QList<Adapter> discoverAdapters() {
             a.gateway = QHostAddress((entry.ip().toIPv4Address() & entry.netmask().toIPv4Address()) + 1).toString();
             break;
         }
+        // The hotspot virtual adapter only carries its 192.168.137.1 address
+        // while the hotspot is on, so this doubles as an "is on" check.
+        a.hotspot = (a.name + " " + a.label).contains("Wi-Fi Direct", Qt::CaseInsensitive) ||
+                    a.ip == "192.168.137.1";
         if (!a.ip.isEmpty()) result.append(a);
     }
     return result;
@@ -185,12 +189,14 @@ void Preferences::load(QSettings &s) {
     gateway = s.value("network/gateway").toString(); relayPath = s.value("advanced/relay").toString();
     diagnostics = s.value("advanced/diagnostics", false).toBool();
     capture = s.value("advanced/capture", false).toBool(); discover = s.value("advanced/discover", true).toBool();
+    dhcp = s.value("network/dhcp", false).toBool();
     autoSelectOverlayAdapter(discoverAdapters());
 }
 void Preferences::save(QSettings &s) const {
     s.setValue("network/local", localInterface); s.setValue("network/overlay", overlayInterface);
     s.setValue("network/gateway", gateway); s.setValue("advanced/relay", relayPath);
     s.setValue("advanced/diagnostics", diagnostics); s.setValue("advanced/capture", capture);
+    s.setValue("network/dhcp", dhcp); s.sync();
     s.setValue("advanced/discover", discover); s.sync();
 }
 Adapter Preferences::overlay(const QList<Adapter> &all) const {
@@ -203,6 +209,15 @@ QString Preferences::validate(const QList<Adapter> &all) const {
     bool local = false;
     for (const auto &a : all) if (a.name == localInterface && a.up) local = true;
     if (!local) return "The saved local adapter is unavailable. Check Settings.";
+#ifdef Q_OS_WIN
+    // Automatic (DHCP) mode is built around the PC hotspot: the relay is the
+    // only DHCP server there, so there is no race to lose.
+    if (dhcp) {
+        bool hotspotUp = false;
+        for (const auto &a : all) if (a.hotspot && a.up) hotspotUp = true;
+        if (!hotspotUp) return "Turn on the PC mobile hotspot first (Play tab), then refresh adapters.";
+    }
+#endif
     const auto a = overlay(all);
     if (!a.up || a.ip.isEmpty()) return "The saved ZeroTier adapter is unavailable. Connect ZeroTier, then refresh Settings.";
 #ifdef Q_OS_WIN
@@ -230,6 +245,7 @@ QStringList Preferences::arguments(const QList<Adapter> &all, const QString &pre
                      "--subnet", a.subnet, "--gateway", gateway.isEmpty() ? a.gateway : gateway, "--status-events"};
     if (diagnostics) args << "--diagnostics";
     if (!discover) args << "--no-discover-switch";
+    if (dhcp) args << "--dhcp";
     if (capture) args << "--capture-prefix" << prefix;
     return args;
 }

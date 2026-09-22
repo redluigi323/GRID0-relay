@@ -10,6 +10,9 @@
 struct Adapter {
     QString name, label, ip, mask, subnet, gateway;
     bool overlay = false, wifi = false, up = false;
+    // Windows Mobile Hotspot virtual adapter (Microsoft Wi-Fi Direct Virtual
+    // Adapter, typically 192.168.137.1 when the hotspot is on).
+    bool hotspot = false;
 };
 QList<Adapter> discoverAdapters();
 QString bundledRelayPath();
@@ -25,7 +28,7 @@ QStringList getZeroTierNetworkIPs(const QString &networkId = QStringLiteral("8bd
 
 struct Preferences {
     QString localInterface, overlayInterface, gateway, relayPath;
-    bool diagnostics = false, capture = false, discover = true;
+    bool diagnostics = false, capture = false, discover = true, dhcp = false;
     void load(QSettings &settings);
     void save(QSettings &settings) const;
     QString validate(const QList<Adapter> &adapters) const;
