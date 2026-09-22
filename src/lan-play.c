@@ -228,6 +228,29 @@ static bool lan_play_relay_wifi_ipv4(struct lan_play *lan_play, const u_char *fr
     if (ip_len > ETHER_MTU || frame_len < ETHER_HEADER_LEN + ip_len ||
         (!is_nintendo_lan_broadcast(original_dst) && !is_zerotier_destination(lan_play, original_dst))) return false;
 
+    /* Never forward the console's ICMP "port unreachable" replies to overlay
+     * peers. A peer's game reads them as "the host is dead" and stops sending
+     * (on Windows the sending UDP socket is poisoned as well), which is the
+     * join failure seen with DHCP/Automatic consoles: the emulator probes the
+     * Switch address from the beacon payload, gets "unreachable" back, and
+     * then never transmits its join request. Silence is not a lie here; the
+     * relay is a bridge, never the endpoint, so this error is meaningless to
+     * the peer. */
+    {
+        const size_t icmp_header_len = (ip[IPV4_OFF_VER_LEN] & 0x0f) * 4;
+        const bool icmp_fragment = (READ_NET16(ip, IPV4_OFF_FLAGS_FRAG_OFFSET) & 0x3fff) != 0;
+        if (ip[IPV4_OFF_PROTOCOL] == IPV4_PROTOCOL_ICMP && !icmp_fragment &&
+            icmp_header_len >= IPV4_HEADER_LEN && ip_len >= icmp_header_len + 8) {
+            const uint8_t *icmp = ip + icmp_header_len;
+            if (icmp[0] == 3 && icmp[1] == 3) {
+                LLOG(LLOG_INFO, "Dropped Switch ICMP port-unreachable %u.%u.%u.%u -> %u.%u.%u.%u; not forwarded to the ZeroTier peer",
+                    ip[IPV4_OFF_SRC], ip[IPV4_OFF_SRC + 1], ip[IPV4_OFF_SRC + 2], ip[IPV4_OFF_SRC + 3],
+                    ip[IPV4_OFF_DST], ip[IPV4_OFF_DST + 1], ip[IPV4_OFF_DST + 2], ip[IPV4_OFF_DST + 3]);
+                return true; /* Consumed: do not forward, do not fall through. */
+            }
+        }
+    }
+
     uint8_t translated[ETHER_MTU];
     memcpy(translated, ip, ip_len);
     const uint8_t *dst = is_nintendo_lan_broadcast(original_dst)
@@ -319,8 +342,20 @@ static bool lan_play_relay_zerotier_ipv4(struct lan_play *lan_play, const u_char
     const uint16_t ip_len = READ_NET16(ip, IPV4_OFF_TOTAL_LEN);
     const uint8_t *original_dst = ip + IPV4_OFF_DST;
     const bool broadcast = CMP_IPV4(original_dst, lan_play->zerotier_broadcast_ip);
+    /* Games join the remote console by its own address (learned from the room
+     * beacon), not by the relay PC's ZeroTier address. Classic lan-play routed
+     * those by Switch IP on the central server; on ZeroTier there is no
+     * server, so a unicast packet addressed to the locally detected Switch is
+     * delivered straight to this relay's console. Anything else addressed to
+     * neither us nor broadcast is still dropped. */
+    const bool for_switch = !broadcast && CMP_IPV4(original_dst, lan_play->switch_ip);
     if (ip_len > ETHER_MTU || frame_len < ETHER_HEADER_LEN + ip_len ||
-        (!broadcast && !CMP_IPV4(original_dst, lan_play->zerotier_ip))) return false;
+        (!broadcast && !CMP_IPV4(original_dst, lan_play->zerotier_ip) && !for_switch)) return false;
+    if (for_switch && !lan_play->warned_direct_switch_delivery) {
+        lan_play->warned_direct_switch_delivery = true;
+        LLOG(LLOG_INFO, "Delivering ZeroTier traffic addressed to the local Switch %u.%u.%u.%u directly; the game joins the console address, not the relay address",
+            lan_play->switch_ip[0], lan_play->switch_ip[1], lan_play->switch_ip[2], lan_play->switch_ip[3]);
+    }
 
     uint8_t translated[ETHER_MTU];
     uint8_t wifi_broadcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
@@ -610,8 +645,13 @@ static bool learn_local_switch(struct lan_play *lp, const uint8_t *frame, size_t
             lp->switch_nintendo_oui = true;
             LLOG(LLOG_INFO, "Switch candidate carries a Nintendo vendor prefix; treating as console");
         }
-        if (dhcp)
-            LLOG(LLOG_INFO, "Switch candidate uses a DHCP/Automatic address on the Wi-Fi subnet");
+        if (dhcp) {
+            if (options.dhcp_server)
+                LLOG(LLOG_WARNING, "Switch took address %u.%u.%u.%u from the hotspot's own DHCP instead of the relay's 10.147.17.x pool: room joins will fail. On the Switch go to System Settings > Internet > Internet Settings > this network > Delete Settings, then rejoin while the relay is running (restart the relay too), and confirm the Switch shows a 10.147.17.x address.",
+                    ip[0], ip[1], ip[2], ip[3]);
+            else
+                LLOG(LLOG_INFO, "Switch candidate uses a DHCP/Automatic address on the Wi-Fi subnet");
+        }
         /* Confirm the Wi-Fi path right away instead of waiting for game traffic. */
         probe_wifi_delivery(lp);
     }

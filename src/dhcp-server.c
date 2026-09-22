@@ -177,9 +177,12 @@ static int dhcp_send_reply(struct lan_play *lp, const uint8_t dst_mac[6],
     WRITE_NET16(dhcp, 6, (uint16_t)(req->xid & 0xffff));
     WRITE_NET16(dhcp, 10, req->flags);
     if (yiaddr) CPY_IPV4(dhcp + 16, yiaddr);
-    /* siaddr: the server identifier the client unicasts to. The Wi-Fi
-     * address is directly reachable on the local LAN. */
-    CPY_IPV4(dhcp + 20, lp->wifi_ip);
+    /* siaddr: the server identifier the client unicasts to. This must be our
+     * relay gateway address on the ZeroTier subnet: renewals unicast here are
+     * proxy-ARPed to us and answered. Pointing it at the Wi-Fi address would
+     * send renewals to the hotspot's own DHCP server, which NAKs our lease
+     * and knocks the Switch offline mid-session. */
+    CPY_IPV4(dhcp + 20, lp->packet_ctx.ip);
     CPY_MAC(dhcp + 28, dst_mac);
     WRITE_NET16(dhcp, 236, (uint16_t)(DHCP_MAGIC >> 16));
     WRITE_NET16(dhcp, 238, (uint16_t)(DHCP_MAGIC & 0xffff));
@@ -187,7 +190,7 @@ static int dhcp_send_reply(struct lan_play *lp, const uint8_t dst_mac[6],
     size_t off = 240;
     off = dhcp_opt(dhcp, off, DHCP_OPT_MSG_TYPE, &msg_type, 1);
     if (msg_type != DHCP_MSG_NAK) {
-        off = dhcp_opt(dhcp, off, DHCP_OPT_SERVER_ID, lp->wifi_ip, 4);
+        off = dhcp_opt(dhcp, off, DHCP_OPT_SERVER_ID, lp->packet_ctx.ip, 4);
         uint8_t lease_be[4];
         uint32_t lease = DHCP_LEASE_TIME;
         lease_be[0] = (lease >> 24) & 0xff;
@@ -209,7 +212,7 @@ static int dhcp_send_reply(struct lan_play *lp, const uint8_t dst_mac[6],
     WRITE_NET16(ip, IPV4_OFF_ID, ++dhcp_ip_id);
     ip[IPV4_OFF_TTL] = 64;
     ip[IPV4_OFF_PROTOCOL] = IPV4_PROTOCOL_UDP;
-    CPY_IPV4(ip + IPV4_OFF_SRC, lp->wifi_ip);
+    CPY_IPV4(ip + IPV4_OFF_SRC, lp->packet_ctx.ip);
     memset(ip + IPV4_OFF_DST, 0xff, 4);
     WRITE_NET16(ip, IPV4_OFF_CHECKSUM, 0);
     WRITE_NET16(ip, IPV4_OFF_CHECKSUM, ipv4_header_checksum(ip, IPV4_HEADER_LEN));

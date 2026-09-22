@@ -83,6 +83,7 @@ struct lan_play {
     bool switch_dhcp;
     uint64_t switch_mac_conflicts;
     bool warned_broadcast_mismatch;
+    bool warned_direct_switch_delivery;
     struct dhcp_server_state dhcp_state;
     struct packet_ctx zerotier_neighbors;
     struct native_udp_guard *udp_guard;
