@@ -101,6 +101,30 @@ static bool dhcp_pick_ip(struct lan_play *lp, const uint8_t mac[6], uint8_t out[
     uint32_t gw = ipv4_to_u32(lp->packet_ctx.ip);
     uint32_t self = ipv4_to_u32(lp->zerotier_ip);
 
+    /* Prefer the relay's own ZeroTier address for the first console. A
+     * unified overlay identity (console == relay) keeps the beacon payload
+     * and the rewritten packet headers consistent, which peer game logic
+     * requires to accept joins. Additional consoles fall back to the
+     * .254-downward pool below. */
+    {
+        uint8_t ip[4];
+        u32_to_ipv4(self, ip);
+        bool taken = false;
+        for (int i = 0; i < DHCP_LEASE_COUNT; ++i) {
+            if (st->leases[i].used && st->leases[i].expires > now &&
+                CMP_IPV4(st->leases[i].ip, ip) &&
+                !CMP_MAC(st->leases[i].mac, mac)) {
+                taken = true;
+                break;
+            }
+        }
+        if (!taken && !arp_has_ip(&lp->packet_ctx, ip) &&
+            (!lp->switch_seen || CMP_IPV4(ip, lp->switch_ip))) {
+            CPY_IPV4(out, ip);
+            return true;
+        }
+    }
+
     for (uint32_t cand = bcast - 1; cand > net && (bcast - cand) <= 24; --cand) {
         uint8_t ip[4];
         u32_to_ipv4(cand, ip);
