@@ -122,13 +122,13 @@ Window::Window(bool preview) : previewMode(preview) {
     });
     settingsHint = text("Use the exact subnet mask shown here. After changing network settings, reconnect your Switch and restart the game before entering LAN mode.");
     playLayout->addWidget(settingsHint);
-    dhcpHint = text("Set your Switch to Automatic and connect it to this PC's mobile hotspot. When the relay starts it runs a DHCP server on the hotspot that gives each Nintendo console a ZeroTier-subnet address — nothing to type in.");
+    dhcpHint = text("Set your Switch to Automatic and connect it to this PC's mobile hotspot. When the relay starts it runs a DHCP server on the hotspot that gives each Nintendo console a ZeroTier-subnet address, nothing to type in.");
     playLayout->addWidget(dhcpHint);
     hotspotStatus = text(""); hotspotStatus->setWordWrap(true);
     playLayout->addWidget(hotspotStatus);
 #ifdef Q_OS_WIN
     hotspotSetup = new QPushButton("Set up PC hotspot…");
-    hotspotSetup->setToolTip("Opens Windows' Mobile hotspot settings. Turn the hotspot on, then come back — the relay picks it up on its own.");
+    hotspotSetup->setToolTip("Opens Windows' Mobile hotspot settings. Turn the hotspot on, then come back and the relay picks it up on its own.");
     playLayout->addWidget(hotspotSetup, 0, Qt::AlignLeft);
     connect(hotspotSetup, &QPushButton::clicked, this, [this] {
         QDesktopServices::openUrl(QUrl("ms-settings:network-mobilehotspot"));
@@ -311,7 +311,7 @@ void Window::updateState() {
 #ifdef Q_OS_WIN
             hotspotStatus->setText(hotspotIp.isEmpty()
                 ? "PC hotspot: off. Turn it on with the button below, then connect your Switch to it."
-                : ("PC hotspot: on (" + hotspotIp + ") — connect your Switch to it."));
+                : ("PC hotspot: on (" + hotspotIp + "), connect your Switch to it."));
 #else
             hotspotStatus->setText(hotspotIp.isEmpty()
                 ? "Automatic mode works best with a PC-hosted hotspot."
